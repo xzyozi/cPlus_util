@@ -1,4 +1,4 @@
-include "menu.hpp"
+#include "menu.hpp"
 #include <iomanip>
 
 namespace cui {
@@ -7,21 +7,19 @@ namespace cui {
 std::string InputLog::fmt_time(std::chrono::system_clock::time_point tp) {
     std::time_t tt = std::chrono::system_clock::to_time_t(tp);
     std::tm tm{};
-    #ifdef _WIN32
-        localtime_s(&tm, &tt);
-    #else
-        localtime_r(&tt, &tm);
-    #endif
+#ifdef _WIN32
+    localtime_s(&tm, &tt);
+#else
+    localtime_r(&tt, &tm);
+#endif
     std::ostringstream oss;
     oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
     return oss.str();
 }
 
-// 履歴を出力ストリームに表示する
 void InputLog::display(std::ostream& out) const {
     out << "\n[History] Records: " << entries_.size() << "\n";
     out << "-------------------------------------------------------------\n";
-    // メンバ変数 entries_ が std::vector<InputLogEntry> であると仮定しています
     for (const auto& entry : entries_) {
         out << fmt_time(entry.timestamp) << " | "
             << "menu_path: " << std::left << std::setw(15) << entry.menu_path.substr(0, 15) << " | "
@@ -30,7 +28,6 @@ void InputLog::display(std::ostream& out) const {
     }
     out << "-------------------------------------------------------------\n";
 }
-
 
 // ===== Menu =====
 Menu::Menu(std::string title) : title_(std::move(title)) {}
@@ -46,12 +43,12 @@ void Navigator::run(const Menu& root) {
 
     while (running && !stack_.empty()) {
         render();
-        int choice = -999;
+        int choice = kInvalidInput;
         if (!read_choice(choice)) {
             out_ << "\n[!] 入力が得られませんでした（EOF）。終了します。\n";
             break;
         }
-        int n = choice; // 0 は Back/Exit, 1..N は項目
+        int n = choice;
         const Menu& cur = *stack_.back();
 
         // 0: Back/Exit
@@ -68,7 +65,7 @@ void Navigator::run(const Menu& root) {
             if (it.kind != MenuItemKind::Back && it.kind != MenuItemKind::Exit) ++visibleCount;
         }
         if (n < 0 || n > visibleCount) {
-            log_.record(make_log(cur, last_raw_input_, -1, "invalid"));
+            log_.record(make_log(cur, last_raw_input_, kInvalidInput, "invalid"));
             out_ << "[!] 番号が不正です。0〜" << visibleCount << " で選択してください。\n\n";
             continue;
         }
@@ -89,14 +86,13 @@ void Navigator::run(const Menu& root) {
                             out_ << "[!] 例外: " << e.what() << "\n";
                             log_.record(make_log(cur, "action-exception", n, "error"));
                         }
-                        break; // 実行後は同じメニューへ戻る
+                        break;
                     case MenuItemKind::Submenu:
                         if (item.child) stack_.push_back(item.child);
                         else out_ << "[!] 子メニューが設定されていません。\n";
                         break;
                     case MenuItemKind::Back:
                     case MenuItemKind::Exit:
-                        // ここには来ない（0で処理）
                         break;
                 }
                 break;
@@ -110,7 +106,7 @@ void Navigator::render() const {
     out_ << "\n    === " << breadcrumb() << " ===\n";
     int visibleIndex = 0;
     for (const auto& it : m.items()) {
-        if (it.kind == MenuItemKind::Back || it.kind == MenuItemKind::Exit) continue; // 0 枠で表示するのでスキップ
+        if (it.kind == MenuItemKind::Back || it.kind == MenuItemKind::Exit) continue;
         ++visibleIndex;
         out_ << "    " << visibleIndex << ") " << it.label << "\n";
     }
@@ -134,16 +130,15 @@ bool Navigator::read_choice(int& out) {
     std::istringstream iss(line);
     int n;
     if (iss >> n) { out = n; return true; }
-    // 先頭が数字でない場合は不正入力として -999 を返す（呼び出し側で弾く）
-    out = -999;
+    out = kInvalidInput;
     return true;
 }
 
 InputLogEntry Navigator::make_log(const Menu& m, const std::string& raw, int choice, const std::string& status) const {
+    (void)m;
     return InputLogEntry{std::chrono::system_clock::now(), breadcrumb(), raw, choice, status};
 }
 
-// InputLogの表示機能を呼び出すラッパー
 void Navigator::show_history() const {
     log_.display(out_);
 }
