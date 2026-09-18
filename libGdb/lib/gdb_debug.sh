@@ -57,7 +57,13 @@ set unwindonsignal on
 # 汎用観測点マーカー gdb_probe(label, value) で停止し、value を
 # GDB のネイティブ表示で丸ごと出力する。対象に依存しない完全汎用形。
 # 見せたいメンバの列挙は不要（value を p するだけ）。
-break gdb_probe
+#
+# gdb_probe はテンプレートのため、実体はマングル名
+#   gdb_probe<T>(char const*, T const&)
+# になる。プレーン名の `break gdb_probe` では張れないので、正規表現で
+# 全インスタンスに張れる `rbreak` を使う。rbreak 直後の commands は
+# 直前に設定されたブレイク群に適用される。
+rbreak ^gdb_probe
 commands
   silent
   printf "\n[GDB] === probe: %s ===\n", label

@@ -91,7 +91,7 @@ gdb_probe("out_dump", out);   // ここで停止。value=out を GDB が丸ご�
 メンバ名を列挙しない。
 
 ```gdb
-break gdb_probe
+rbreak ^gdb_probe
 commands
   silent
   printf "\n[GDB] === probe: %s ===\n", label
@@ -101,8 +101,12 @@ end
 ```
 
 `value` が `gdb_probe` 自身のフレームに存在するため `up` は不要。
-`__attribute__((noinline))` によりテンプレート実体が確実に残り、
-`break gdb_probe` が各インスタンスへ pending で一括適用される。
+`__attribute__((noinline))` によりテンプレート実体が確実に残る。
+
+`gdb_probe` はテンプレートなので、実体はマングル名
+`gdb_probe<T>(char const*, T const&)` になる。プレーン名の
+`break gdb_probe` では張れないため、正規表現で全インスタンスに張れる
+`rbreak ^gdb_probe` を使う（これが結果が空になる問題の対策）。
 
 ## 自分のテスト対象を追加するとき
 
