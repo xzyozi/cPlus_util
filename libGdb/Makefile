@@ -7,9 +7,26 @@
 # バージョン     : 1.0
 # 修正履歴       : 
 
+# ============================================================
+# ビルドモード切り替え
+#   USE_LIBS=0 (既定) : スタンドアローン。業務 INCLUDE/LIBS に依存せず、
+#                       標準ライブラリのみでビルドする。
+#   USE_LIBS=1        : 従来どおり業務 INCLUDE/LIBS をリンクする。
+#
+#   例:
+#     make                # スタンドアローン（USE_LIBS=0）
+#     make USE_LIBS=1      # 業務ライブラリを使用
+# ============================================================
+USE_LIBS ?= 0
+
+CC	= g++
+
 # 共通設定
 DEVHOME = ../../../..
 APLHOME = ../../..
+
+ifeq ($(USE_LIBS),1)
+# ---------- 業務ライブラリ使用モード ----------
 INCLUDE	=	\
  		-I /usr/pgsql-11/include \
 		-I /opt/mel/modern/include \
@@ -27,10 +44,6 @@ INCLUDE	=	\
 		-I $(APLHOME)/cmn/include/cmn0030DbTable \
 		-I $(APLHOME)/tpl/include \
 		-I $(APLHOME)/cdh/include/cdh \
-
-CC	= g++
-
-CXXFLAGS	= -fpic -g3 -finline-functions -Wall -Wconversion $(INCLUDE)
 
 LIBS    = \
         $(APLHOME)/cgt/lib/libCgt0920.a \
@@ -56,6 +69,20 @@ LIBS    = \
         /opt/mel/modern/lib64/libkihon.so \
         /opt/mel/modern/lib64/libets.a \
         /usr/pgsql-11/lib/libpq.so \
+
+# 業務ライブラリ使用時のコンパイルフラグ（従来どおり）
+CXXFLAGS	= -fpic -g3 -finline-functions -Wall -Wconversion $(INCLUDE)
+
+else
+# ---------- スタンドアローンモード（既定・依存なし） ----------
+# 業務 INCLUDE/LIBS を一切使わない。標準ライブラリのみ。
+INCLUDE	=
+LIBS    =
+
+# 観測点関数を確実に残すため -O0（-finline-functions は付けない）
+CXXFLAGS	= -g3 -O0 -std=c++11 -Wall -Wextra -Wconversion $(INCLUDE)
+
+endif
 
 LDFLAGS	=
 
