@@ -26,8 +26,6 @@ libGdb/
 │   ├── main.cpp        #   テストシナリオ（gdb_probe で観測点を置く）
 │   ├── childResultTest.hpp  #  テストデータ生成・書き込み/読み込み（業務非依存）
 │   └── childResultTest.cpp  #    同上（インメモリのデータストアで動作）
-├── tools/              # 補助ツール
-│   └── static_check.py #   静的解析（g++/gdb なしで構成・整合を検査）
 └── generated/          # 【自動生成物】make で毎回作り直す（Git 管理外）
     ├── obj/            #   オブジェクトファイル
     ├── testChildPrcKnr #   実行ファイル
@@ -117,19 +115,6 @@ end
 `.gdb` は `p value` で対象を丸ごと出力するので、メンバごとの調整や
 `lib/` 側の編集は不要。ラベルはブレイク時にどの観測点かの識別に使う。
 
-## 静的解析（g++/gdb が無い環境向け）
-
-実機の g++/gdb が使えない環境では、`tools/static_check.py` で構成・整合を
-静的に検査できる（GDB は動かさない）。
-
-```bash
-python tools/static_check.py
-```
-
-検査内容: ディレクトリ構成、`#include` 解決、業務コード依存の残存、
-観測点（`gdb_probe`）と生成 `.gdb` の整合、Makefile/スクリプトのパス整合、
-宣言と定義の対応。実機での実ビルド・GDB 実行の代替にはならない。
-
 ## エビデンスのログ出力
 
 - ログのファイル出力機構はフラグ管理とし、**既定は off**（GDB 出力を見ることが
@@ -142,5 +127,4 @@ python tools/static_check.py
   `USE_LIBS=0`（スタンドアローン）でビルドできる構成。
 - 観測点は汎用マーカー `gdb_probe` に統一し、生成 `.gdb` から対象固有の
   ハードコード（メンバ列挙）を排除済み。`lib/` は対象非依存。
-- ビルド・実行（実 GDB）は Linux 実機（g++ + gdb）に依存する。この環境では
-  `tools/static_check.py` による静的検査までを実施している。
+- ビルド・実行（実 GDB）は Linux 実機（g++ + gdb）に依存する。
