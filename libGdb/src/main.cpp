@@ -4,28 +4,12 @@
 #include "header.h"
 
 // ==========================================
-// GDB用ダミー関数（観測点）
-//   生成される .gdb（gdb_debug.sh が作成）がここに break を張り、
-//   引数のスコープにある変数を p してエビデンスを採取する。
-//   業務コード・DB には依存しない。
+// 観測点は libGdb 共通の汎用マーカー gdb_probe(label, value) を使う。
+// 対象固有のダミー関数は定義しない（対象非依存化）。
+// 見せたい変数を gdb_probe に渡すだけで、生成される .gdb は
+//   break gdb_probe / p value
+// だけで済む（メンバ名の列挙が不要）。
 // ==========================================
-void gdb_dump_read_date(int pid, int flg, const char *ym, const char *hdk,
-                        const char *ymd) {
-  volatile int p = pid;
-  volatile int f = flg;
-  volatile const char *d1 = ym;
-  volatile const char *d2 = hdk;
-  volatile const char *d3 = ymd;
-  (void)p;
-  (void)f;
-  (void)d1;
-  (void)d2;
-  (void)d3;
-}
-
-void gdb_dump_out(const std::vector<ChildResultTest::CalResult> &out) {
-  (void)out;
-}
 
 namespace {
 
@@ -50,10 +34,9 @@ void runCase(int expectedPid, int expectedFlg) {
   ChildResultTest::ReadKey key = makeMatchKey(expectedPid, expectedFlg);
   std::vector<ChildResultTest::CalResult> out;
 
-  gdb_dump_read_date(key.oya_process_id, key.cal_result_flg, key.cal_ym.c_str(),
-                     key.cal_heidokyu.c_str(), key.cal_ymd.c_str());
+  gdb_probe("read_key", key); // 入力条件のエビデンス（value=key）
   (void)ChildResultTest::readCalResult(key, out);
-  gdb_dump_out(out);
+  gdb_probe("out_dump", out); // 読み込み結果のエビデンス（value=out）
 }
 
 } // namespace

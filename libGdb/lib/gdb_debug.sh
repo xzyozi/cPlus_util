@@ -50,37 +50,19 @@ set confirm off
 set breakpoint pending on
 set print elements 0
 set print repeats 0
-set print pretty off
+set print pretty on
 set print symbol-filename off
 set unwindonsignal on
 
-# 読み込み条件のエビデンス
-break gdb_dump_read_date
+# 汎用観測点マーカー gdb_probe(label, value) で停止し、value を
+# GDB のネイティブ表示で丸ごと出力する。対象に依存しない完全汎用形。
+# 見せたいメンバの列挙は不要（value を p するだけ）。
+break gdb_probe
 commands
   silent
-  printf "\n[GDB] === read condition ===\n"
-  printf " cal_ym=%s\n", ym
-  printf " heidokyu=%s\n", hdk
-  printf " ymd=%s\n", ymd
-  continue
-end
-
-# 読み込み結果のエビデンス
-break gdb_dump_out
-commands
-  silent
-  printf "[GDB] --- out dump ---\n"
-  set $n = (int)out.size()
-  printf " out.size=%d\n", $n
-  set $i = 0
-  while ($i < $n)
-    printf " rec[%d].oya_process_id=%d\n", $i, out[$i].oya_process_id
-    printf " rec[%d].cal_result_flg=%d\n", $i, out[$i].cal_result_flg
-    printf " rec[%d].cal_ym=\"%s\"\n", $i, (char*)&out[$i].cal_ym[0]
-    printf " rec[%d].cal_heidokyu=\"%s\"\n", $i, (char*)&out[$i].cal_heidokyu[0]
-    printf " rec[%d].cal_ymd=\"%s\"\n", $i, (char*)&out[$i].cal_ymd[0]
-    set $i = $i + 1
-  end
+  printf "\n[GDB] === probe: %s ===\n", label
+  printf "(gdb) p value\n"
+  p value
   continue
 end
 

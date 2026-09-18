@@ -17,18 +17,21 @@ GDB を使った C++ 単体検証で、エビデンス（証跡）を楽に採�
 libGdb/
 ├── README.md
 ├── .gitignore          # generated/ を除外
-├── lib/                # 【ライブラリ本体】固定資産。基本は触らない
+├── lib/                # 【ライブラリ本体】固定資産。基本は触らない・対象非依存
 │   ├── Makefile        #   ビルド定義（USE_LIBS 切替・generated を作り直す）
 │   ├── gdb_debug.sh    #   build → .gdb 自動生成 → test 実行 のランナー
+│   ├── gdb_probe.hpp   #   汎用観測点マーカー gdb_probe(label, value)（テンプレート）
 │   └── header.h        #   共通ヘッダ
 ├── src/                # 【可変ファイル】sample: 自分のテスト対象を書く場所
-│   ├── main.cpp        #   テストシナリオ（ケースを実行順に並べる）
+│   ├── main.cpp        #   テストシナリオ（gdb_probe で観測点を置く）
 │   ├── childResultTest.hpp  #  テストデータ生成・書き込み/読み込み（業務非依存）
 │   └── childResultTest.cpp  #    同上（インメモリのデータストアで動作）
+├── tools/              # 補助ツール
+│   └── static_check.py #   静的解析（g++/gdb なしで構成・整合を検査）
 └── generated/          # 【自動生成物】make で毎回作り直す（Git 管理外）
     ├── obj/            #   オブジェクトファイル
     ├── testChildPrcKnr #   実行ファイル
-    └── dump_generated.gdb  # 自動生成される GDB スクリプト
+    └── dump_generated.gdb  # 自動生成される GDB スクリプト（汎用形）
 ```
 
 - **lib/（本体）**: ビルドと実行の仕組み。原則ユーザーは編集しない。
@@ -74,17 +77,58 @@ make clean      # generated/ を削除
 | スタンドアローン（既定） | `USE_LIBS=0` | 業務 INCLUDE/LIBS を使わず標準ライブラリのみ。観測点を残すため `-O0`。 |
 | 業務ライブラリ使用       | `USE_LIBS=1` | 業務 INCLUDE/LIBS をリンク（パスは実環境に合わせて調整）。             |
 
+## 観測点の仕組み（汎用マーカー gdb_probe）
+
+観測点は libGdb 共通の**汎用テンプレートマーカー** `gdb_probe(label, value)`
+に統一している（`lib/gdb_probe.hpp`）。見せたい変数を値として渡すだけで、
+型は自動推論される。対象が変わってもマーカーは書き直さない。
+
+```cpp
+std::vector<Foo> out;
+readSomething(key, out);
+gdb_probe("out_dump", out);   // ここで停止。value=out を GDB が丸ごと表示
+```
+
+生成される `.gdb`（`lib/gdb_debug.sh` が出力）は**対象非依存の汎用形**で、
+メンバ名を列挙しない。
+
+```gdb
+break gdb_probe
+commands
+  silent
+  printf "\n[GDB] === probe: %s ===\n", label
+  p value          # value を GDB のネイティブ表示で丸ごと出力
+  continue
+end
+```
+
+`value` が `gdb_probe` 自身のフレームに存在するため `up` は不要。
+`__attribute__((noinline))` によりテンプレート実体が確実に残り、
+`break gdb_probe` が各インスタンスへ pending で一括適用される。
+
 ## 自分のテスト対象を追加するとき
 
-`src/` を編集する（`lib/` と `generated/` は触らない）。
+`src/` だけを編集する（`lib/` と `generated/` は触らない・対象非依存）。
 
 1. `src/` にテストデータ生成・読み込みロジックを書く（`childResultTest.*` が雛形）
-2. `src/main.cpp` のシナリオに、観測点ダミー関数（`gdb_dump_read_date` /
-   `gdb_dump_out`）を要所に置いて呼ぶ
+2. `src/main.cpp` のシナリオで、見せたい変数を `gdb_probe("ラベル", 変数)` に渡す
 3. `lib/` で `./gdb_debug.sh` を実行すると、build → .gdb 生成 → 実行まで走る
 
-観測点で見せたいメンバを変えたい場合は、`lib/gdb_debug.sh` が生成する
-`.gdb` のヒアドキュメント部分（`p` 出力）を調整する。
+`.gdb` は `p value` で対象を丸ごと出力するので、メンバごとの調整や
+`lib/` 側の編集は不要。ラベルはブレイク時にどの観測点かの識別に使う。
+
+## 静的解析（g++/gdb が無い環境向け）
+
+実機の g++/gdb が使えない環境では、`tools/static_check.py` で構成・整合を
+静的に検査できる（GDB は動かさない）。
+
+```bash
+python tools/static_check.py
+```
+
+検査内容: ディレクトリ構成、`#include` 解決、業務コード依存の残存、
+観測点（`gdb_probe`）と生成 `.gdb` の整合、Makefile/スクリプトのパス整合、
+宣言と定義の対応。実機での実ビルド・GDB 実行の代替にはならない。
 
 ## エビデンスのログ出力
 
@@ -96,4 +140,7 @@ make clean      # generated/ を削除
 
 - `src/` の `main.cpp` / `childResultTest.*` は業務コード・DB 非依存へ移行済み。
   `USE_LIBS=0`（スタンドアローン）でビルドできる構成。
-- ビルド・実行は Linux 実機（g++ + gdb）に依存する。
+- 観測点は汎用マーカー `gdb_probe` に統一し、生成 `.gdb` から対象固有の
+  ハードコード（メンバ列挙）を排除済み。`lib/` は対象非依存。
+- ビルド・実行（実 GDB）は Linux 実機（g++ + gdb）に依存する。この環境では
+  `tools/static_check.py` による静的検査までを実施している。
