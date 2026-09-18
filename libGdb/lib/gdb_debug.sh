@@ -2,20 +2,21 @@
 # ============================================================
 # libGdb: build → .gdb 自動生成 → test 実行 を1本で行うランナー
 #
+# ディレクトリ構成（このスクリプトは lib/ にある）:
+#   libGdb/
+#   ├── lib/        … ライブラリ本体（このスクリプト・Makefile・header.h）
+#   ├── src/        … 可変ファイル（sample: テスト対象を書く）
+#   └── generated/  … 自動生成物（obj・実行ファイル・.gdb）。make で毎回作り直す
+#
 # 流れ:
 #   1. make で build（既定 USE_LIBS=0＝スタンドアローン。引数で切替可）
-#   2. dump 用 .gdb をこのスクリプトが自動生成
+#      -> make が generated/ を作り直し、実行ファイルを generated/ に出力
+#   2. dump 用 .gdb を generated/ に自動生成
 #   3. 生成した .gdb で gdb を起動し、test を実行してエビデンスを採取
 #
-# 使い方:
+# 使い方（lib/ で実行）:
 #   ./gdb_debug.sh                 # スタンドアローン build → 実行
 #   ./gdb_debug.sh USE_LIBS=1      # 業務ライブラリ使用 build → 実行
-#
-# 前提（案B / 現状の制約）:
-#   main.cpp が業務コード（Cgt0927 等）に依存したままだと、
-#   スタンドアローン（USE_LIBS=0）の build は通らない。
-#   スタンドアローンで通すには main.cpp の依存除去が別途必要。
-#   本スクリプトは build → .gdb 生成 → 実行の「流れ」を固定する枠組み。
 #
 # 実行環境: Linux + g++ + gdb（PostgreSQL 不要）
 # ============================================================
@@ -24,20 +25,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+GENDIR="../generated"
+TARGET_EXEC="${GENDIR}/testChildPrcKnr"
+GEN_GDB="${GENDIR}/dump_generated.gdb"
+
 # make へ渡す追加引数（例: USE_LIBS=1）をそのまま透過する
 MAKE_ARGS=("$@")
-
-TARGET_EXEC="./testChildPrcKnr"
-GEN_GDB="dump_generated.gdb"   # 自動生成する .gdb（毎回上書き）
 
 echo "====================================================="
 echo " [1/3] build (make ${MAKE_ARGS[*]:-})"
 echo "====================================================="
+# make が generated/ を削除して作り直す（生成物は make 時に作り直す想定）
 make "${MAKE_ARGS[@]}"
 
 echo "====================================================="
 echo " [2/3] generate gdb script -> ${GEN_GDB}"
 echo "====================================================="
+mkdir -p "${GENDIR}"
 # dump 用 .gdb をヒアドキュメントで自動生成する。
 # 観測点（ダミー関数）でブレイクして結果を出力する定型。
 cat > "${GEN_GDB}" <<'GDBEOF'
