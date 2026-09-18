@@ -14,7 +14,6 @@ GDB を使った C++ 単体検証で、エビデンス（証跡）を楽に採�
 ```
 libGdb/
 ├── README.md
-├── .gitignore          # generated/ を除外
 ├── lib/                # 【ライブラリ本体】固定資産。基本は触らない・対象非依存
 │   ├── Makefile        #   ビルド定義（USE_LIBS 切替・generated を作り直す）
 │   ├── gdb_debug.sh    #   build → .gdb 自動生成 → test 実行 のランナー
@@ -34,7 +33,8 @@ libGdb/
 - **src/（可変）**: 検証したい関数・データをユーザーが書く場所。sample として
   `childResultTest.*` と `main.cpp` を同梱している。
 - **generated/（生成物）**: `make` 実行時に **毎回削除して作り直す**。
-  `.gitignore` で除外しているのでコミット対象にならない。
+  プロジェクトルートの `.gitignore`（`libGdb/generated/`）で除外しているので
+  コミット対象にならない。
 
 ## 使い方（build → .gdb 自動生成 → test 実行）
 
