@@ -53,11 +53,11 @@ jobs:
         if: steps.check_pkg.outputs.has_pkg == 'true'
         shell: bash
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
+          if [ ! -f package-lock.json ]; then
+            echo "package-lock.json is required for reproducible TypeScript CI." >&2
+            exit 1
           fi
+          npm ci
 
       - name: Lint check
         if: steps.check_pkg.outputs.has_pkg == 'true'
