@@ -14,6 +14,8 @@ GDB を使った C++ 単体検証で、エビデンス（証跡）を楽に採�
 ```
 libGdb/
 ├── README.md
+├── docs/               # テストコード作成などの詳細手順
+│   └── TEST_CREATION_GUIDE.md
 ├── lib/                # 【ライブラリ本体】固定資産。基本は触らない・対象非依存
 │   ├── Makefile        #   ビルド定義（USE_LIBS 切替・generated を作り直す）
 │   ├── gdb_debug.sh    #   build → .gdb 自動生成 → test 実行 のランナー
@@ -35,6 +37,14 @@ libGdb/
 - **generated/（生成物）**: `make` 実行時に **毎回削除して作り直す**。
   プロジェクトルートの `.gitignore`（`libGdb/generated/`）で除外しているので
   コミット対象にならない。
+- **docs/（手順書）**: テストコードを追加する具体的な手順と確認項目をまとめている。
+
+## テストコードの作成
+
+新しいテストの作成手順、モックの実装方法、期待値の自動検証、GDB出力の確認方法は、
+以下の手順書を参照してください。
+
+- [テストコード作成手順](docs/TEST_CREATION_GUIDE.md)
 
 ## 使い方（build → .gdb 自動生成 → test 実行）
 
