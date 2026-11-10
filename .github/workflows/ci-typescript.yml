@@ -1,0 +1,76 @@
+name: TypeScript CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/ci-typescript.yml"
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/ci-typescript.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check package.json presence
+        id: check_pkg
+        shell: bash
+        run: |
+          if [ -f package.json ]; then
+            echo "has_pkg=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pkg=false" >> "$GITHUB_OUTPUT"
+            echo "No package.json found at repository root; skipping TypeScript checks."
+          fi
+
+      - name: Setup Node.js (LTS)
+        if: steps.check_pkg.outputs.has_pkg == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.check_pkg.outputs.has_pkg == 'true'
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Lint check
+        if: steps.check_pkg.outputs.has_pkg == 'true'
+        run: npm run lint --if-present
+
+      - name: Type check
+        if: steps.check_pkg.outputs.has_pkg == 'true'
+        run: npm run typecheck --if-present
+
+      - name: Unit test
+        if: steps.check_pkg.outputs.has_pkg == 'true'
+        run: npm test --if-present
+
+      - name: Build
+        if: steps.check_pkg.outputs.has_pkg == 'true'
+        run: npm run build --if-present
