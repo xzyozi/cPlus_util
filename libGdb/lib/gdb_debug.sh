@@ -73,9 +73,13 @@ commands
 end
 
 run
+if $_exitcode != 0
+  printf "\\n[GDB] test process exited with code %d\\n", $_exitcode
+  quit 1
+end
 GDBEOF
 
 echo "====================================================="
-echo " [3/3] run test (gdb -x ${GEN_GDB})"
+echo " [3/3] run test (gdb -batch -x ${GEN_GDB})"
 echo "====================================================="
-gdb -q -x "${GEN_GDB}" --args "${TARGET_EXEC}"
+gdb -q -batch -x "${GEN_GDB}" --args "${TARGET_EXEC}"
