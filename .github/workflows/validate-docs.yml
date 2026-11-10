@@ -45,4 +45,9 @@ jobs:
 
       - name: Validate docs
         shell: bash
-        run: python .github/scripts/validate_docs.py docs libGdb README.md
+        run: |
+          targets=(README.md libGdb)
+          if [ -d docs ]; then
+            targets+=(docs)
+          fi
+          python .github/scripts/validate_docs.py "${targets[@]}"
