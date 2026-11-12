@@ -4,7 +4,7 @@
 #
 # ディレクトリ構成（このスクリプトは lib/ にある）:
 #   libGdb/
-#   ├── lib/        … ライブラリ本体（このスクリプト・Makefile・header.h）
+#   ├── lib/        … sample 用のビルド・実行定義（このスクリプト・Makefile・header.h）
 #   ├── src/        … 可変ファイル（sample: テスト対象を書く）
 #   └── generated/  … 自動生成物（obj・実行ファイル・.gdb）。make で毎回作り直す
 #

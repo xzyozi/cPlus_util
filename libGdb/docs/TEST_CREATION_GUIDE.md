@@ -25,17 +25,19 @@ PostgreSQLや業務ライブラリを使わないテストは、`USE_LIBS=0` の
 
 ## 3. 変更するファイル
 
-テスト追加時は、原則として `libGdb/src/` だけを変更します。
+このsampleでは、テスト追加時に原則として `libGdb/src/` だけを変更します。
+別ツールへ展開する場合は、`gdb_probe.hpp` をコピーして使い、Makefileと
+`gdb_debug.sh` は各ツールの対象・配置・リンク構成に合わせて用意します。
 
-| ファイル | 役割 |
-| --- | --- |
-| `src/main.cpp` | テストシナリオ、期待値検証、GDB観測点 |
-| `src/<name>Test.hpp` | テスト用構造体、関数宣言、定数 |
-| `src/<name>Test.cpp` | モック、テストデータ、補助関数 |
-| `lib/gdb_probe.hpp` | 共通のGDB観測点。原則変更しない |
-| `lib/Makefile` | ビルド定義。原則変更しない |
-| `lib/gdb_debug.sh` | ビルドとGDB実行のランナー。原則変更しない |
-| `generated/` | ビルド時の生成物。直接編集しない |
+| ファイル             | 役割                                                        |
+| -------------------- | ----------------------------------------------------------- |
+| `src/main.cpp`       | テストシナリオ、期待値検証、GDB観測点                       |
+| `src/<name>Test.hpp` | テスト用構造体、関数宣言、定数                              |
+| `src/<name>Test.cpp` | モック、テストデータ、補助関数                              |
+| `lib/gdb_probe.hpp`  | コピーして使う共通のGDB観測点。通常は変更しない             |
+| `lib/Makefile`       | このsample用のビルド定義。対象に応じて変更する              |
+| `lib/gdb_debug.sh`   | このsample用のビルドとGDB実行ランナー。対象に応じて変更する |
+| `generated/`         | ビルド時の生成物。直接編集しない                            |
 
 既存の `childResultTest.hpp` と `childResultTest.cpp` は、テスト用構造体とインメモリモックのサンプルです。
 
