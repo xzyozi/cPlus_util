@@ -3,7 +3,7 @@
 #
 # ディレクトリ構成（このファイルは lib/ にある）:
 #   libGdb/
-#   ├── lib/        … ライブラリ本体（このファイル・header.h・gdb_debug.sh）
+#   ├── lib/        … sample 用のビルド・実行定義（このファイル・header.h・gdb_debug.sh）
 #   ├── src/        … 可変ファイル（sample: テスト対象を書く。*.cpp / *.hpp）
 #   └── generated/  … 自動生成物（obj・実行ファイル・.gdb）。make で毎回作り直す
 #

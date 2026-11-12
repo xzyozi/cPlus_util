@@ -16,11 +16,11 @@ libGdb/
 ├── README.md
 ├── docs/               # テストコード作成などの詳細手順
 │   └── TEST_CREATION_GUIDE.md
-├── lib/                # 【ライブラリ本体】固定資産。基本は触らない・対象非依存
-│   ├── Makefile        #   ビルド定義（USE_LIBS 切替・generated を作り直す）
-│   ├── gdb_debug.sh    #   build → .gdb 自動生成 → test 実行 のランナー
-│   ├── gdb_probe.hpp   #   汎用観測点マーカー gdb_probe(label, value)（テンプレート）
-│   └── header.h        #   共通ヘッダ
+├── lib/                # 共通観測資産と、このsample用のビルド・実行定義
+│   ├── Makefile        #   sample用ビルド定義（USE_LIBS 切替）
+│   ├── gdb_debug.sh    #   sample用の build → .gdb生成 → test実行ランナー
+│   ├── gdb_probe.hpp   #   コピーして使う汎用観測点マーカー（version: 1）
+│   └── header.h        #   sample用共通ヘッダ
 ├── src/                # 【可変ファイル】sample: 自分のテスト対象を書く場所
 │   ├── main.cpp        #   テストシナリオ（gdb_probe で観測点を置く）
 │   ├── childResultTest.hpp  #  テストデータ生成・書き込み/読み込み（業務非依存）
@@ -31,10 +31,13 @@ libGdb/
     └── dump_generated.gdb  # 自動生成される GDB スクリプト（汎用形）
 ```
 
-- **lib/（本体）**: ビルドと実行の仕組み。原則ユーザーは編集しない。
+- **lib/**: sample用のビルドと実行の仕組み、および `gdb_probe.hpp` のコピー元。
+  `Makefile`、`gdb_debug.sh`、`header.h` は sample の対象・配置を前提とするため、
+  各ツールへそのまま共通基盤として持ち込まない。
 - **src/（可変）**: 検証したい関数・データをユーザーが書く場所。sample として
   `childResultTest.*` と `main.cpp` を同梱している。
-- **generated/（生成物）**: `make` 実行時に **毎回削除して作り直す**。
+- **generated/（生成物）**: sample の `make` 実行時に削除して作り直す。
+  試験結果や証跡を保存するツールでは、生成物と証跡を別ディレクトリに分ける。
   プロジェクトルートの `.gitignore`（`libGdb/generated/`）で除外しているので
   コミット対象にならない。
 - **docs/（手順書）**: テストコードを追加する具体的な手順と確認項目をまとめている。
@@ -74,7 +77,8 @@ make USE_LIBS=1 # 業務 INCLUDE/LIBS をリンク
 make clean      # generated/ を削除
 ```
 
-`make` は実行のたびに `generated/` を丸ごと削除してから作り直す。
+sample の `make` は実行のたびに `generated/` を丸ごと削除してから作り直す。
+各ツールの試験結果・証跡は、再実行や `make clean` で消えない保存先を別途設ける。
 
 ## ビルドモード（USE_LIBS）
 
@@ -118,7 +122,10 @@ end
 
 ## 自分のテスト対象を追加するとき
 
-`src/` だけを編集する（`lib/` と `generated/` は触らない・対象非依存）。
+この sample では `src/` を編集する。別ツールを作る場合は、`gdb_probe.hpp` を
+コピーして使い、Makefile・実行スクリプト・ケース定義は対象ごとに持つ。
+`lib/Makefile` と `gdb_debug.sh` は sample の実行ファイル名・配置・リンク構成を
+前提としているため、そのまま共通基盤として使用しない。
 
 1. `src/` にテストデータ生成・読み込みロジックを書く（`childResultTest.*` が雛形）
 2. `src/main.cpp` のシナリオで、見せたい変数を `gdb_probe("ラベル", 変数)` に渡す
@@ -137,6 +144,6 @@ end
 
 - `src/` の `main.cpp` / `childResultTest.*` は業務コード・DB 非依存へ移行済み。
   `USE_LIBS=0`（スタンドアローン）でビルドできる構成。
-- 観測点は汎用マーカー `gdb_probe` に統一し、生成 `.gdb` から対象固有の
-  ハードコード（メンバ列挙）を排除済み。`lib/` は対象非依存。
+- 観測点は汎用マーカー `gdb_probe` に統一している。`gdb_probe.hpp` は共有・コピー
+  対象だが、`lib/` の Makefile とランナーは sample 固有である。
 - ビルド・実行（実 GDB）は Linux 実機（g++ + gdb）に依存する。
