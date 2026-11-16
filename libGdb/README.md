@@ -4,90 +4,83 @@ GDB を使った C++ 単体検証で、エビデンス（証跡）を楽に採�
 ツール。テスト対象を実行し、GDB のネイティブ出力（`p 変数` の型付き表示）を
 そのまま証跡として残すことを狙う。現状は **sample（お手本）** として扱う。
 
+構成は `sclComBatTest` / `sclWebApiTest` と同じフラット形式に揃えている。
+`libGdb` は、これらのテストを作るときの雛形であり、`gdb_probe.hpp` の正本を持つ。
+
 ## 実行環境
 
-- Linux + g++ + gdb（**PostgreSQL は不要**）
-- 版管理は Git
+- Linux + g++ + gdb（**PostgreSQL は不要**、業務ライブラリにも依存しない）
 
-## ディレクトリ構成（役割で3分割）
+## ディレクトリ構成
 
 ```
 libGdb/
 ├── README.md
-├── docs/               # テストコード作成などの詳細手順
+├── main.cpp              # ドライバ（ケース名を受け取り1ケース実行。IN_* / RET= / VALUE= を出力）
+├── childResultTest.hpp   # 試験対象（sample: インメモリのデータストアとモック）
+├── childResultTest.cpp
+├── Makefile              # ビルド。出力は generated/
+├── run_tests.sh          # ケース表を1ケースずつ別プロセスで実行し 良/否 を判定
+├── cases/
+│   └── childResult.tsv   # ケース表（C01〜C08）
+├── lib/
+│   └── gdb_probe.hpp     # 共有資産の正本（version: 1）。各テストへコピーして使う
+├── docs/
 │   └── TEST_CREATION_GUIDE.md
-├── lib/                # 共通観測資産と、このsample用のビルド・実行定義
-│   ├── Makefile        #   sample用ビルド定義（USE_LIBS 切替）
-│   ├── gdb_debug.sh    #   sample用の build → .gdb生成 → test実行ランナー
-│   ├── gdb_probe.hpp   #   コピーして使う汎用観測点マーカー（version: 1）
-│   └── header.h        #   sample用共通ヘッダ
-├── src/                # 【可変ファイル】sample: 自分のテスト対象を書く場所
-│   ├── main.cpp        #   テストシナリオ（gdb_probe で観測点を置く）
-│   ├── childResultTest.hpp  #  テストデータ生成・書き込み/読み込み（業務非依存）
-│   └── childResultTest.cpp  #    同上（インメモリのデータストアで動作）
-└── generated/          # 【自動生成物】make で毎回作り直す（Git 管理外）
-    ├── obj/            #   オブジェクトファイル
-    ├── testChildPrcKnr #   実行ファイル
-    └── dump_generated.gdb  # 自動生成される GDB スクリプト（汎用形）
+├── generated/            # 実行ファイル・証跡・結果。管理外（make clean で削除）
+└── _old_structure/       # 旧構成（lib/ と src/ の分割）の退避。不要なら削除してよい
 ```
 
-- **lib/**: sample用のビルドと実行の仕組み、および `gdb_probe.hpp` のコピー元。
-  `Makefile`、`gdb_debug.sh`、`header.h` は sample の対象・配置を前提とするため、
-  各ツールへそのまま共通基盤として持ち込まない。
-- **src/（可変）**: 検証したい関数・データをユーザーが書く場所。sample として
-  `childResultTest.*` と `main.cpp` を同梱している。
-- **generated/（生成物）**: sample の `make` 実行時に削除して作り直す。
-  試験結果や証跡を保存するツールでは、生成物と証跡を別ディレクトリに分ける。
-  プロジェクトルートの `.gitignore`（`libGdb/generated/`）で除外しているので
-  コミット対象にならない。
-- **docs/（手順書）**: テストコードを追加する具体的な手順と確認項目をまとめている。
+- **`gdb_probe.hpp`（正本）**: 持ってきて基本変更しないものとして扱う。変更が必要な
+  ときは、`lib/` の正本を直して `version` を上げ、各テストへコピーし直す。
+  各テストは `libGdb` に依存せず、コピーしたファイルだけで独立して扱う。
+- **ドライバ（`main.cpp`）**: 標準出力に `IN_*=`（入力）、`RET=`、`VALUE=` を出す。
+  `run_tests.sh` はこの出力でケースの合否を判定し、証跡にも使う。
+- **`generated/`**: `make` では消さない。`make clean` で削除する。証跡は
+  `generated/evidence/<実行日時>/` に実行ごとに分かれて残る。
 
-## テストコードの作成
-
-新しいテストの作成手順、モックの実装方法、期待値の自動検証、GDB出力の確認方法は、
-以下の手順書を参照してください。
-
-- [テストコード作成手順](docs/TEST_CREATION_GUIDE.md)
-
-## 使い方（build → .gdb 自動生成 → test 実行）
-
-`lib/gdb_debug.sh` が次の3ステップを1本で行う。**`lib/` で実行する。**
-
-1. `make` で build（既定は `USE_LIBS=0`＝スタンドアローン）。
-   make が `generated/` を作り直し、実行ファイルを `generated/` に出力する。
-2. dump 用の `.gdb`（`generated/dump_generated.gdb`）を自動生成
-3. 生成した `.gdb` で `gdb` を起動し、test を実行してエビデンスを採取
+## 使い方
 
 ```bash
-cd lib
-
-# スタンドアローン build → 実行
-./gdb_debug.sh
-
-# 業務ライブラリを使う build → 実行（make へ引数を透過）
-./gdb_debug.sh USE_LIBS=1
+make                                    # generated/libGdbSample を作る
+./run_tests.sh                          # cases/*.tsv を全件実行
+./run_tests.sh --filter 'C0[1-3]'       # ID が glob に一致するケースのみ
+./run_tests.sh --gdb                    # gdb 経由で実行し、gdb_probe の入出力を証跡に保存
+make clean                              # generated/ を削除（証跡も消える）
 ```
 
-### ビルドだけ行う場合（lib/ で実行）
+- 判定は `良` / `否` の2種類。
+- 終了コード: 0=全件 良 / 1=否あり / 2=準備不備（実行ファイルなし、`--gdb` で gdb なし 等）。
+- `generated/result_<日時>.tsv` に判定の一覧を保存する。
+- 証跡は `generated/evidence/<実行日時>/<ID>.log`。先頭付近に入力（`IN_*=`）、続いて
+  `RET=`・`VALUE=` を記録する。`--gdb` 時は観測点ごとに GDB のネイティブ表示が入る。
 
-```bash
-cd lib
-make            # スタンドアローン（USE_LIBS=0・標準ライブラリのみ）
-make USE_LIBS=1 # 業務 INCLUDE/LIBS をリンク
-make clean      # generated/ を削除
+### `--gdb` の出力例
+
+```text
+[GDB] === probe: read_key ===
+(gdb) p value
+$1 = {oya_process_id = 12345, cal_result_flg = 1, cal_ym = "202407", ...}
+
+[GDB] === probe: out_dump ===
+(gdb) p value
+$2 = std::vector of length 1, capacity 1 = {{...}}
 ```
 
-sample の `make` は実行のたびに `generated/` を丸ごと削除してから作り直す。
-各ツールの試験結果・証跡は、再実行や `make clean` で消えない保存先を別途設ける。
+出力は `p value` の素の表示で、加工しない。
 
-## ビルドモード（USE_LIBS）
+## ケース表の書き方（`cases/childResult.tsv`）
 
-| モード                   | 指定         | 内容                                                                   |
-| ------------------------ | ------------ | ---------------------------------------------------------------------- |
-| スタンドアローン（既定） | `USE_LIBS=0` | 業務 INCLUDE/LIBS を使わず標準ライブラリのみ。観測点を残すため `-O0`。 |
-| 業務ライブラリ使用       | `USE_LIBS=1` | 業務 INCLUDE/LIBS をリンク（パスは実環境に合わせて調整）。             |
+タブ区切り・UTF-8・LF。`#` で始まる行はコメント。4列。
 
-## 観測点の仕組み（汎用マーカー gdb_probe）
+| 列          | 内容                                                              |
+| ----------- | ----------------------------------------------------------------- |
+| `id`        | ケース ID（`C01` など）                                           |
+| `case`      | `main.cpp` のケース名（`single` `multi` `none` `unmatch_pid` 他） |
+| `exp_ret`   | `NML` / `ERR`                                                     |
+| `exp_value` | ドライバの `VALUE=` の期待値（`count=<件数>`）。`-` は照合しない  |
+
+## 観測点の仕組み（汎用マーカー `gdb_probe`）
 
 観測点は libGdb 共通の**汎用テンプレートマーカー** `gdb_probe(label, value)`
 に統一している（`lib/gdb_probe.hpp`）。見せたい変数を値として渡すだけで、
@@ -99,7 +92,7 @@ readSomething(key, out);
 gdb_probe("out_dump", out);   // ここで停止。value=out を GDB が丸ごと表示
 ```
 
-生成される `.gdb`（`lib/gdb_debug.sh` が出力）は**対象非依存の汎用形**で、
+`run_tests.sh --gdb` が生成する `.gdb`（`generated/probe.gdb`）は**対象非依存の汎用形**で、
 メンバ名を列挙しない。
 
 ```gdb
@@ -107,43 +100,32 @@ rbreak ^gdb_probe
 commands
   silent
   printf "\n[GDB] === probe: %s ===\n", label
-  p value          # value を GDB のネイティブ表示で丸ごと出力
+  printf "(gdb) p value\n"
+  p value
   continue
 end
+run
 ```
-
-`value` が `gdb_probe` 自身のフレームに存在するため `up` は不要。
-`__attribute__((noinline))` によりテンプレート実体が確実に残る。
 
 `gdb_probe` はテンプレートなので、実体はマングル名
 `gdb_probe<T>(char const*, T const&)` になる。プレーン名の
 `break gdb_probe` では張れないため、正規表現で全インスタンスに張れる
-`rbreak ^gdb_probe` を使う（これが結果が空になる問題の対策）。
+`rbreak ^gdb_probe` を使う。`__attribute__((noinline))` と `-O0` により、
+観測点が最適化で消えないようにしている。
 
-## 自分のテスト対象を追加するとき
+## 新しいテストを作るとき
 
-この sample では `src/` を編集する。別ツールを作る場合は、`gdb_probe.hpp` を
-コピーして使い、Makefile・実行スクリプト・ケース定義は対象ごとに持つ。
-`lib/Makefile` と `gdb_debug.sh` は sample の実行ファイル名・配置・リンク構成を
-前提としているため、そのまま共通基盤として使用しない。
+詳細は [テストコード作成手順](docs/TEST_CREATION_GUIDE.md) を参照。
 
-1. `src/` にテストデータ生成・読み込みロジックを書く（`childResultTest.*` が雛形）
-2. `src/main.cpp` のシナリオで、見せたい変数を `gdb_probe("ラベル", 変数)` に渡す
-3. `lib/` で `./gdb_debug.sh` を実行すると、build → .gdb 生成 → 実行まで走る
-
-`.gdb` は `p value` で対象を丸ごと出力するので、メンバごとの調整や
-`lib/` 側の編集は不要。ラベルはブレイク時にどの観測点かの識別に使う。
-
-## エビデンスのログ出力
-
-- ログのファイル出力機構はフラグ管理とし、**既定は off**（GDB 出力を見ることが
-  主目的で、記録ファイルは副次的）。フラグの外部設定ファイル読み込みは
-  ログ機構本体に持たせず、別レイヤーの責務とする方針。
+1. 新しいディレクトリ（例: `sclXxxTest/`）を `libGdb` と同じ階層に作る。
+2. `lib/gdb_probe.hpp` をコピーする。
+3. `main.cpp`（ドライバ）、`Makefile`、`run_tests.sh`、`cases/*.tsv` を、この sample
+   または `sclComBatTest` を雛形に用意する。実ライブラリにリンクするテストは、
+   `sclComBatTest/Makefile` を雛形にする。
 
 ## 補足
 
-- `src/` の `main.cpp` / `childResultTest.*` は業務コード・DB 非依存へ移行済み。
-  `USE_LIBS=0`（スタンドアローン）でビルドできる構成。
-- 観測点は汎用マーカー `gdb_probe` に統一している。`gdb_probe.hpp` は共有・コピー
-  対象だが、`lib/` の Makefile とランナーは sample 固有である。
+- 本 sample は業務ライブラリに依存せず、`USE_LIBS` による切替は廃止した。旧版にあった
+  業務ライブラリのリンク定義は、`_old_structure/lib/Makefile` に残してある。
+- `generated/` と `_old_structure/` は、版管理の対象にするか、除外するかを運用に合わせて決める。
 - ビルド・実行（実 GDB）は Linux 実機（g++ + gdb）に依存する。
