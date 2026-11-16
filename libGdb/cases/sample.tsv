@@ -1,0 +1,10 @@
+# libGdb sample のケース表（タブ区切り・UTF-8・LF。# で始まる行はコメント）
+# 列: id	case	exp_ret	exp_value
+#   case      : main.cpp の case 名
+#   exp_ret   : NML / ERR
+#   exp_value : ドライバが出力する VALUE= の値。- = 照合しない
+S01	one	NML	count=1
+S02	many	NML	count=3
+S03	mixed	NML	count=1
+S04	none	NML	count=0
+S05	invalid	ERR	count=0
