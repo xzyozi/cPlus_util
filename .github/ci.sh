@@ -8,7 +8,7 @@ for command in g++ make; do
   fi
 done
 
-cd libGdb/lib
+cd libGdb
 if command -v gdb >/dev/null 2>&1; then
   ./gdb_debug.sh
 else
