@@ -21,23 +21,23 @@ gdb --version
 make --version
 ```
 
-PostgreSQLや業務ライブラリを使わないテストは、`USE_LIBS=0` のスタンドアローンモードで実行できます。
+このsampleは業務ライブラリに依存しません（標準ライブラリのみ）。実ライブラリにリンクするテストは、`sclComBatTest` の Makefile を雛形にします。
 
 ## 3. 変更するファイル
 
-このsampleでは、テスト追加時に原則として `libGdb/src/` だけを変更します。
-別ツールへ展開する場合は、`gdb_probe.hpp` をコピーして使い、Makefileと
-`gdb_debug.sh` は各ツールの対象・配置・リンク構成に合わせて用意します。
+このsampleでは、テスト追加時に次のファイルを変更します。構成は `sclComBatTest` / `sclWebApiTest` と同じフラット形式です。
+別ツールへ展開する場合は、`lib/gdb_probe.hpp` を新しいツールのディレクトリへコピーして使い、ほかのファイルは各ツールの対象・リンク構成に合わせて用意します。
 
-| ファイル             | 役割                                                        |
-| -------------------- | ----------------------------------------------------------- |
-| `src/main.cpp`       | テストシナリオ、期待値検証、GDB観測点                       |
-| `src/<name>Test.hpp` | テスト用構造体、関数宣言、定数                              |
-| `src/<name>Test.cpp` | モック、テストデータ、補助関数                              |
-| `lib/gdb_probe.hpp`  | コピーして使う共通のGDB観測点。通常は変更しない             |
-| `lib/Makefile`       | このsample用のビルド定義。対象に応じて変更する              |
-| `lib/gdb_debug.sh`   | このsample用のビルドとGDB実行ランナー。対象に応じて変更する |
-| `generated/`         | ビルド時の生成物。直接編集しない                            |
+| ファイル            | 役割                                                                      |
+| ------------------- | ------------------------------------------------------------------------- |
+| `main.cpp`          | ドライバ。ケース名を受け取り1ケース実行し、`IN_*=` `RET=` `VALUE=` を出力 |
+| `<name>Test.hpp`    | テスト用構造体、関数宣言、定数                                            |
+| `<name>Test.cpp`    | モック、テストデータ、補助関数                                            |
+| `cases/*.tsv`       | ケース表（ID、ケース名、期待する戻り値と出力値）                          |
+| `run_tests.sh`      | ケース表を1ケースずつ別プロセスで実行し、良/否を判定する                  |
+| `Makefile`          | ビルド定義。出力は `generated/`                                           |
+| `lib/gdb_probe.hpp` | 共通のGDB観測点の正本。コピーして使い、通常は変更しない                   |
+| `generated/`        | 実行ファイル・証跡・結果。直接編集しない                                  |
 
 既存の `childResultTest.hpp` と `childResultTest.cpp` は、テスト用構造体とインメモリモックのサンプルです。
 
@@ -55,11 +55,11 @@ PostgreSQLや業務ライブラリを使わないテストは、`USE_LIBS=0` の
 - 固定長文字列へ正しく格納する
 - エラー時に期待した戻り値を返す
 
-各テストケースには、成功条件を明記します。GDB出力の目視確認だけにせず、可能な範囲で `assert` による自動判定も追加してください。
+各テストケースには、成功条件を明記します。GDB出力の目視確認だけにせず、ケース表（`cases/*.tsv`）の期待値で自動判定できるようにしてください。
 
 ### 4.2 テスト用の型とAPIを定義する
 
-業務型を直接利用できない場合は、`src/<name>Test.hpp` にテスト用の型を定義します。
+業務型を直接利用できない場合は、`<name>Test.hpp` にテスト用の型を定義します。
 
 ```cpp
 struct ReadKey {
@@ -130,90 +130,67 @@ int setupUnmatchedIdData() {
 
 テストケース間でデータが残らないよう、各ケースの開始時にストアをクリアします。
 
-### 4.5 `main.cpp` にシナリオを追加する
+### 4.5 `main.cpp`（ドライバ）にケースを追加する
+
+ドライバは、ケース名を受け取って1ケースだけ実行し、結果を標準出力へ出します。
+複数ケースの実行は `run_tests.sh` が行い、ケースごとに別プロセスで起動します。
 
 1ケースにつき、次の順序で処理します。
 
-1. ストアをクリアする
-2. テストデータを登録する
-3. 入力キーを作成する
-4. テスト対象を呼び出す
-5. 戻り値と結果を検証する
-6. `gdb_probe` で入力と出力を観測する
+1. ストアをクリアし、ケースに応じたテストデータを登録する
+2. 入力キーを作成する
+3. 入力を `IN_*=` で標準出力へ出す
+4. `gdb_probe` で入力を観測し、テスト対象を呼び出し、`gdb_probe` で出力を観測する
+5. `RET=` と `VALUE=` を標準出力へ出す
 
 ```cpp
-void runCase(const ReadKey &key, std::size_t expectedCount) {
-  std::vector<Result> out;
+std::cout << "IN_CASE=" << caseName << std::endl;
 
-  gdb_probe("read_key", key);
-  int rc = readResult(key, out);
-  gdb_probe("out_dump", out);
+std::vector<Result> out;
+gdb_probe("read_key", key);
+const int rc = readResult(key, out);
+gdb_probe("out_dump", out);
 
-  assert(rc == RETURN_OK);
-  assert(out.size() == expectedCount);
-}
+std::cout << "RET=" << (rc == RETURN_OK ? "NML" : "ERR") << std::endl;
+std::cout << "VALUE=count=" << out.size() << std::endl;
+return (rc == RETURN_OK) ? 0 : 1;
 ```
 
 GDBで確認したい値は、テスト対象の呼び出し前後で `gdb_probe` に渡します。
 
-```cpp
-gdb_probe("input", key);
-readResult(key, out);
-gdb_probe("output", out);
+### 4.6 ケース表で自動判定する
+
+合否は `cases/*.tsv` の期待値で判定します。GDB出力は証跡として使います。
+`assert` ではなく、ドライバの出力（`RET=` と `VALUE=`）と、ケース表の期待値を `run_tests.sh` が照合します。
+
+```text
+# id	case	exp_ret	exp_value
+C01	single	NML	count=1
+C03	none	NML	count=0
 ```
 
-### 4.6 自動判定を追加する
-
-GDB出力は証跡として利用し、テストの合否はプログラムでも判定します。
-
-```cpp
-#include <cassert>
-
-assert(rc == RETURN_OK);
-assert(out.size() == 1);
-assert(out[0].id == expectedId);
-```
-
-エラー系テストでは、期待するエラーコードを明示します。
-
-```cpp
-assert(rc == RETURN_NG);
-assert(out.empty());
-```
-
-`assert` が無効になるビルド設定を使う場合は、終了コードを返す独自の検証関数など、別の自動判定方法を使用してください。
+- `exp_ret` は `NML` または `ERR`。
+- `exp_value` はドライバの `VALUE=` と完全一致で照合する。`-` は照合しない。
+- 不一致データを混ぜたケースは、期待件数を「一致したレコードだけ」の件数にする。
 
 ## 5. ビルドと実行
 
-`libGdb/lib/` に移動して、スタンドアローンモードで実行します。
+`libGdb/` で実行します。
 
 ```bash
-cd lib
 make
-./gdb_debug.sh
+./run_tests.sh            # 全ケースを実行し、良/否を判定する
+./run_tests.sh --gdb      # gdb 経由で実行し、gdb_probe の値を証跡に保存する
 ```
 
-`gdb_debug.sh` は、次の処理を順番に実行します。
+`run_tests.sh` は、次の処理を行います。
 
-1. `generated/` を作り直してビルドする
-2. `generated/dump_generated.gdb` を生成する
-3. GDBで実行ファイルを起動する
-4. `gdb_probe` の停止点で値を表示する
+1. `cases/*.tsv` を1行ずつ読み、ケースごとに別プロセスでドライバを起動する
+2. 出力の `RET=` と `VALUE=` を期待値と照合し、`良` / `否` を判定する
+3. `--gdb` 指定時は、`generated/probe.gdb` を生成し、`gdb_probe` の停止点で値を表示する
+4. 結果を `generated/result_<日時>.tsv`、証跡を `generated/evidence/<実行日時>/<ID>.log` に保存する
 
-ビルドだけを確認する場合は、次を実行します。
-
-```bash
-cd lib
-make
-```
-
-業務ライブラリを使うテストでは、環境を確認したうえで次を実行します。
-
-```bash
-cd lib
-make USE_LIBS=1
-./gdb_debug.sh USE_LIBS=1
-```
+`make` は `generated/` を削除しません。証跡を消す場合は `make clean` を使います。
 
 ## 6. GDB出力の確認
 
@@ -241,20 +218,19 @@ make USE_LIBS=1
 ### 実装
 
 - [ ] テストの目的と成功条件を決めた
-- [ ] 変更を `src/` に限定した
 - [ ] テスト用の型とAPIを定義した
 - [ ] モックの責務を最小限にした
 - [ ] テストケース間のデータをクリアした
 - [ ] 一致系と不一致系を用意した
-- [ ] 戻り値と結果を自動判定した
+- [ ] ケース表（`cases/*.tsv`）に期待値を書いた
+- [ ] ドライバが `IN_*=` `RET=` `VALUE=` を出力する
 - [ ] GDBで必要な値を観測できるようにした
 
 ### 実行
 
 - [ ] `make` が成功した
-- [ ] `./gdb_debug.sh` が成功した
-- [ ] プログラムの終了コードが成功を示した
-- [ ] GDB出力に期待した入力と出力が表示された
+- [ ] `./run_tests.sh` が全件 `良` になった
+- [ ] `./run_tests.sh --gdb` の証跡に、期待した入力と出力が表示された
 - [ ] `generated/` の生成物をコミット対象にしていない
 
 ## 8. モックで検証できないもの
