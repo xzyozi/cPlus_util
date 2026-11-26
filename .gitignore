@@ -3,3 +3,6 @@ libGdb/generated/
 # libConf のビルド生成物（make clean で削除）
 libConf/obj/
 libConf/confmng
+# libMenu のビルド生成物（make clean で削除）
+libMenu/obj/
+libMenu/menuTest
