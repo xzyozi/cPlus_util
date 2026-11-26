@@ -1,145 +1,189 @@
 #include "conf.hpp"
-#include <iostream>
 #include <fstream>
-#include <cstdlib>
-#include <iomanip> // setw
+#include <iostream>
+#include <stdexcept> // std::invalid_argument, std::out_of_range
 
 #include <sys/stat.h>
 #ifdef _WIN32
-    #include <direct.h>
-    #include <windows.h>
-    #define MAKE_DIR(path) _mkdir(path)
-    #define STAT_FUNC _stat
-    #define STAT_STRUCT struct _stat
+#include <direct.h>
+#define MAKE_DIR(path) _mkdir(path)
+#define STAT_FUNC _stat
+#define STAT_STRUCT struct _stat
 #else
-    #include <sys/types.h>
-    #include <unistd.h>
-    #define MAKE_DIR(path) mkdir(path, 0777)
-    #define STAT_FUNC stat
-    #define STAT_STRUCT struct stat
+#include <sys/types.h>
+#define MAKE_DIR(path) mkdir(path, 0777)
+#define STAT_FUNC stat
+#define STAT_STRUCT struct stat
 #endif
+
+// --- パス定数 ---
+// 同一翻訳単位内では定義順に初期化されるため、CONFIG_DIR を先に定義する
+const std::string ConfigManager::CONFIG_DIR = "config";
+const std::string ConfigManager::BOOT_PATH =
+    ConfigManager::CONFIG_DIR + "/boot.conf";
+const std::string ConfigManager::LIVE_PATH =
+    ConfigManager::CONFIG_DIR + "/live.conf";
 
 // --- ConfigManager 実装 ---
 
 ConfigManager::ConfigManager() : lastLoadedTime(0) {
 
-    STAT_STRUCT info;
-    if (STAT_FUNC(CONFIG_DIR.c_str(), &info) != 0) {
-        MAKE_DIR(CONFIG_DIR.c_str());
+  STAT_STRUCT info;
+  if (0 != STAT_FUNC(CONFIG_DIR.c_str(), &info)) {
+    if (0 != MAKE_DIR(CONFIG_DIR.c_str())) {
+      std::cerr << "[Config] Failed to create directory: " << CONFIG_DIR
+                << std::endl;
     }
+  }
 
-    setupBindings();
+  setupBindings();
 
-    // Bootロード
-    if (!loadFromFile(BOOT_PATH)) {
-        std::cout << "[Config] Creating default boot config." << std::endl;
-        saveToFile(BOOT_PATH, "Default Boot Settings");
+  // Bootロード
+  if (!loadFromFile(BOOT_PATH)) {
+    std::cout << "[Config] Creating default boot config." << std::endl;
+    if (!saveToFile(BOOT_PATH, "Default Boot Settings")) {
+      std::cerr << "[Config] Failed to create default boot config: "
+                << BOOT_PATH << std::endl;
     }
+  }
 
-    // Liveロード
-    if (!loadFromFile(LIVE_PATH)) {
-        std::cout << "[Config] Creating default live config." << std::endl;
-        saveToFile(LIVE_PATH, "Runtime Live Settings");
-        lastLoadedTime = getFileTimestamp(LIVE_PATH);
+  // Liveロード
+  if (!loadFromFile(LIVE_PATH)) {
+    std::cout << "[Config] Creating default live config." << std::endl;
+    if (!saveToFile(LIVE_PATH, "Runtime Live Settings")) {
+      std::cerr << "[Config] Failed to create default live config: "
+                << LIVE_PATH << std::endl;
     }
+    lastLoadedTime = getFileTimestamp(LIVE_PATH);
+  }
 }
 
 // 変数名と実体の紐付け定義（読み込み用）
 void ConfigManager::setupBindings() {
-    // 読み込み時は検索が必要なので map への登録は維持します
-    #define BIND_PARAMS(name, val, desc, usage) \
-        registry.emplace(#name, std::ref(params.name));
+// 読み込み時は検索が必要なので map への登録は維持します
+#define BIND_PARAMS(name, val, desc, usage)                                    \
+  registry.emplace(#name, std::ref(params.name));
 
-    CONFIG_PARAMS(BIND_PARAMS)
-    #undef BIND_PARAMS
+  CONFIG_PARAMS(BIND_PARAMS)
+#undef BIND_PARAMS
 }
 
-const ConfData& ConfigManager::get() const {
-    return params;
+const ConfData &ConfigManager::get() const { return params; }
+
+std::string ConfigManager::trim(const std::string &s) {
+  if (s.empty())
+    return "";
+  const std::string::size_type first = s.find_first_not_of(" \t\r\n");
+  if (std::string::npos == first)
+    return "";
+  const std::string::size_type last = s.find_last_not_of(" \t\r\n");
+  return s.substr(first, (last - first + 1));
 }
 
-std::string ConfigManager::trim(const std::string& s) {
-    if (s.empty()) return "";
-    size_t first = s.find_first_not_of(" \t\r\n");
-    if (std::string::npos == first) return "";
-    size_t last = s.find_last_not_of(" \t\r\n");
-    return s.substr(first, (last - first + 1));
+time_t ConfigManager::getFileTimestamp(const std::string &path) {
+  STAT_STRUCT result;
+  if (0 == STAT_FUNC(path.c_str(), &result)) {
+    return result.st_mtime;
+  }
+  return 0;
 }
 
-time_t ConfigManager::getFileTimestamp(const std::string& path) {
-    STAT_STRUCT result;
-    if (STAT_FUNC(path.c_str(), &result) == 0) {
-        return result.st_mtime;
+bool ConfigManager::loadFromFile(const std::string &path) {
+  std::ifstream ifs(path);
+  if (!ifs)
+    return false;
+
+  std::string line;
+  while (std::getline(ifs, line)) {
+    line = trim(line);
+    if (line.empty() || '#' == line[0])
+      continue;
+
+    const std::string::size_type pos = line.find('=');
+    if (std::string::npos == pos)
+      continue;
+
+    const std::string key = trim(line.substr(0, pos));
+    const std::string valStr = trim(line.substr(pos + 1));
+
+    const auto it = registry.find(key);
+    if (registry.end() == it)
+      continue;
+
+    // 末尾まで int として変換できない値は不正として無視し、変更前の値を保つ
+    try {
+      std::size_t parsedLen = 0;
+      const int value = std::stoi(valStr, &parsedLen);
+      if (valStr.size() != parsedLen) {
+        std::cerr << "[Config] Invalid value ignored: " << key << "=" << valStr
+                  << std::endl;
+        continue;
+      }
+      // mapに登録された参照経由で値を更新
+      it->second.get() = value;
+    } catch (const std::invalid_argument &) {
+      std::cerr << "[Config] Invalid value ignored: " << key << "=" << valStr
+                << std::endl;
+    } catch (const std::out_of_range &) {
+      std::cerr << "[Config] Out of range value ignored: " << key << "="
+                << valStr << std::endl;
     }
-    return 0;
+  }
+
+  if (LIVE_PATH == path) {
+    lastLoadedTime = getFileTimestamp(path);
+  }
+  return true;
 }
 
-bool ConfigManager::loadFromFile(const std::string& path) {
-    std::ifstream ifs(path);
-    if (!ifs) return false;
+// map（キー順にソートされる）ではなく、マクロ（定義順）を使って書き出します
+// 項目の間に空行を1行入れ、ファイル末尾には余分な空行を出さない
+bool ConfigManager::saveToFile(const std::string &path,
+                               const std::string &header) {
+  std::ofstream ofs(path);
+  if (!ofs) {
+    std::cerr << "[Config] Failed to open for writing: " << path << std::endl;
+    return false;
+  }
 
-    std::string line;
-    while (std::getline(ifs, line)) {
-        line = trim(line);
-        if (line.empty() || line[0] == '#') continue;
+  ofs << "# " << header << "\n";
+  ofs << "# Generated by ConfigManager (Ordered by definition)\n";
 
-        auto pos = line.find('=');
-        if (pos == std::string::npos) continue;
+// マクロ展開用の定義
+// name : 変数名
+// val  : デフォルト値
+// desc : 用途説明
+// usage: 未使用可否
+#define WRITE_ENTRY(name, val, desc, usage)                                    \
+  ofs << "\n";                                                                 \
+  ofs << "###################################################################" \
+         "######\n";                                                           \
+  ofs << "# [ " << #name << " ]\n";                                            \
+  ofs << "# 用途       : " << desc << "\n";                                    \
+  ofs << "# 未使用可否 : " << usage << "\n";                                   \
+  ofs << "# Default    : " << val << "\n";                                     \
+  ofs << "###################################################################" \
+         "######\n";                                                           \
+  ofs << #name << "=" << params.name << "\n";
 
-        std::string key = trim(line.substr(0, pos));
-        std::string valStr = trim(line.substr(pos + 1));
+  CONFIG_PARAMS(WRITE_ENTRY)
 
-        auto it = registry.find(key);
-        if (it != registry.end()) {
-            try {
-                // mapに登録された参照経由で値を更新
-                it->second.get() = std::stoi(valStr);
-            } catch (...) {}
-        }
-    }
+#undef WRITE_ENTRY
 
-    if (path == LIVE_PATH) {
-        lastLoadedTime = getFileTimestamp(path);
-    }
-    return true;
-}
-
-// 保存処理の変更点：
-// map（自動ソートされる）ではなく、マクロ（定義順）を使って書き出します
-void ConfigManager::saveToFile(const std::string& path, const std::string& header) {
-    std::ofstream ofs(path);
-    if (!ofs) return;
-
-    ofs << "# " << header << "\n";
-    ofs << "# Generated by ConfigManager (Auto-sorted by definition order)\n\n";
-
-    // マクロ展開用の定義
-    // name : 変数名
-    // val  : デフォルト値
-    // desc : 用途説明
-    // usage: 未使用可否
-    #define WRITE_ENTRY(name, val, desc, usage) \
-        ofs << "#########################################################################\n"; \
-        ofs << "# [ " << #name << " ]\n"; \
-        ofs << "# 用途       : " << desc << "\n"; \
-        ofs << "# 未使用可否 : " << usage << "\n"; \
-        ofs << "# Default    : " << val << "\n"; \
-        ofs << "#########################################################################\n"; \
-        ofs << #name << "=" << params.name << "\n\n";
-
-
-    CONFIG_PARAMS(WRITE_ENTRY)
-
-    #undef WRITE_ENTRY
+  if (!ofs) {
+    std::cerr << "[Config] Failed to write: " << path << std::endl;
+    return false;
+  }
+  return true;
 }
 
 bool ConfigManager::checkAndReload() {
-    time_t currentMtime = getFileTimestamp(LIVE_PATH);
-    if (currentMtime > 0 && currentMtime != lastLoadedTime) {
-        std::cout << "\n[Config] Detected change. Reloading..." << std::endl;
-        loadFromFile(LIVE_PATH);
-        lastLoadedTime = currentMtime;
-        return true;
-    }
-    return false;
+  const time_t currentMtime = getFileTimestamp(LIVE_PATH);
+  if (0 < currentMtime && lastLoadedTime != currentMtime) {
+    std::cout << "\n[Config] Detected change. Reloading..." << std::endl;
+    loadFromFile(LIVE_PATH);
+    lastLoadedTime = currentMtime;
+    return true;
+  }
+  return false;
 }
