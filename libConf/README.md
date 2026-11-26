@@ -31,7 +31,7 @@ libConf/
 cd libConf
 make            # ./confmng を作る
 ./confmng       # 起動して設定値を表示し、live.conf の変更を待つ（Ctrl+C で終了）
-make clean      # obj/*.o と confmng を削除
+make clean      # obj/ と confmng を削除
 ```
 
 実行中に別の端末で `config/live.conf` を書き換えると、次の確認タイミング（3秒ごと）で
@@ -49,14 +49,18 @@ make clean      # obj/*.o と confmng を削除
 設定ファイルのパスはカレントディレクトリからの相対パス（`config/boot.conf`、`config/live.conf`）。
 実行ファイルは `libConf/` で起動する。
 
+`config/` の作成や既定ファイルの書き出しに失敗した場合は、標準エラー出力にメッセージを
+表示して処理を続ける（設定値は既定値のまま）。
+
 ## 設定ファイルの書式
 
 - 1行1項目で `項目名=値` と書く。前後の空白は無視する。
 - `#` で始まる行と空行は無視する。
 - `confData.hpp` に定義されていない項目名、`=` のない行は無視する。
-- 値は `std::stoi` で `int` として読む。先頭の数字だけを変換するため、`12abc` は `12`、
-  `1.5` は `1` として読まれる。先頭が数字でない値（`abc` など）と `int` の範囲外の値は
-  無視し、変更前の値を保つ。
+- 値は `std::stoi` で `int` として読む。値の末尾まで整数として変換できた場合だけ採用する。
+  `12abc`、`1.5`、`abc`、空の値、`int` の範囲外の値は不正として無視し、変更前の値を保つ。
+  無視した項目名と値は標準エラー出力に `[Config] Invalid value ignored: 項目名=値`
+  （範囲外の場合は `[Config] Out of range value ignored: ...`）と表示する。
 
 ```
 # [ retry_limit ]
@@ -99,7 +103,8 @@ if (conf.checkAndReload()) {              // live.conf が変わっていれば�
 ## 制約
 
 - 値の型は `int` のみ。文字列や小数は扱えない。
-- 設定ファイルのパスは固定（`conf.hpp` の `BOOT_PATH` / `LIVE_PATH`）。
+- 設定ファイルのパスは固定（`conf.cpp` で定義する `BOOT_PATH` / `LIVE_PATH`）。
+- `ConfigManager` はコピー・ムーブできない（内部で自身のメンバーへの参照を持つため）。
 - 変更の検出はファイルの更新日時（秒単位）による。同じ秒の中で2回書き換えると、2回目を
   検出しない場合がある。
 - 再読込は `checkAndReload()` を呼んだときだけ行う。自動では監視しない。

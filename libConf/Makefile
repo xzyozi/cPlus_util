@@ -1,26 +1,32 @@
 # ファイル名     : Makefile
 # 概要           : libConf サンプル（confmng）のビルド
+#                  実行ファイル confmng と obj/ を libConf/ 直下に出力する
 # 共通設定
-INCLUDE	=
-CC	= g++
-CXXFLAGS	= -fpic -g3 -finline-functions -Wall -Wconversion $(INCLUDE)
-LIBS	=
-LDFLAGS	=
-# 担当者別設定
-SRCDIR			= .
-OBJDIR			= $(SRCDIR)/obj
-BINDIR			= .
-TARGET			= ./confmng
-SOURCES			= $(wildcard *.cpp) \
-                  $(wildcard libConf/*.cpp)
-OBJECTS			= $(addprefix $(OBJDIR)/, $(SOURCES:.cpp=.o))
-all:    init $(TARGET)
+CXX      = g++
+CXXFLAGS = -g3 -std=c++11 -Wall -Wextra -Wconversion
+
+OBJDIR   = obj
+TARGET   = confmng
+SOURCES  = $(wildcard *.cpp) \
+           $(wildcard libConf/*.cpp)
+OBJECTS  = $(addprefix $(OBJDIR)/, $(SOURCES:.cpp=.o))
+HDRS     = $(wildcard *.h) $(wildcard libConf/*.hpp)
+
+all: init $(TARGET)
+
 init:
 	@mkdir -p $(dir $(OBJECTS))
-$(TARGET):$(OBJECTS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS)
-$(OBJDIR)/%.o:	%.cpp $(HEADERS)
-	$(CC) $(CXXFLAGS) -c $< -o $@
+
+$(TARGET): $(OBJECTS)
+	$(CXX) -o $@ $(OBJECTS)
+
+$(OBJDIR)/%.o: %.cpp $(HDRS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 clean:
-	@rm -f $(OBJECTS) $(TARGET)
+	@rm -rf $(OBJDIR) $(TARGET)
+
+.PHONY: all init clean
+
 ##################################### EOF ######################################
