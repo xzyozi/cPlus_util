@@ -22,7 +22,7 @@ libArgs/
 │   ├── args.hpp       # 公開 API
 │   └── args.cpp       # 実装
 ├── cases/
-│   └── sample.tsv     # ケース表（A01〜A10 正常系、E01〜E08 異常系）
+│   └── sample.tsv     # ケース表（A01〜A14 正常系、E01〜E14 異常系）
 ├── run_tests.sh       # ケース表を1ケースずつ別プロセスで実行し 良/否 を判定
 └── generated/         # 実行ファイル・obj・証跡・結果。管理外（make clean で削除）
 ```
@@ -78,13 +78,16 @@ make clean                             # generated/ を削除（証跡も消え�
 | `Result::has(long)`                                     | 値がある（指定済みまたは既定値あり）か                                 |
 | `Result::flag(long)`                                    | フラグが指定されたか                                                   |
 | `Result::getString/getInt/getDouble/getBool(long, out)` | 値を型変換して取得。値なし・変換失敗は false（`out` は変更しない）     |
+| `Result::failInvalidValue(long, raw)`                   | 型変換失敗を `invalid_value` として記録（既存のエラーは上書きしない）  |
 | `Result::positionals()`                                 | 位置引数の一覧                                                         |
 | `errorName(kind)`                                       | エラー種別の名前（`unknown_option` など）                              |
 | `toInt/toDouble/toBool(text, out)`                      | 型変換関数（単体でも使える）                                           |
 
 - オプションは長い名前（`--` を除く）で識別する。短い名前は `'\0'` でなし。
 - `Command` の各追加関数は `Command&` を返すので連結して書ける。
-- 同じ名前の重複登録は検査しない（先に登録した定義が使われる）。
+- 定義の誤りは `assert` で停止する（`NDEBUG` 時は検出しない）。対象は、long 名
+  `help` と short 名 `'h'`（`--help` / `-h` の予約名）、同じコマンド内での long 名・
+  short 名の重複。
 
 ### 使用例（サブコマンドあり）
 
@@ -132,37 +135,89 @@ const args::Result r = parser.parse(argc, argv);   // 例: tool -o out.txt a.txt
 // r.positionals() == {"a.txt", "b.txt"}
 ```
 
+### 使用例（libConf と併用し、設定値を引数で上書きする）
+
+libConf（`libConf/libConf/conf.hpp`）の `ConfigManager::get()` は
+`const ConfData&` を返すので、コピーを作ってから引数の値で上書きする。
+`getInt` は値がないとき・変換に失敗したとき `out` を変更しないため、
+引数を指定しなければ設定ファイルの値がそのまま残る。
+
+```cpp
+#include <iostream>
+#include "args.hpp"
+#include "conf.hpp" // libConf。ビルド時は libConf/libConf/conf.cpp もリンクする
+
+int main(int argc, char **argv) {
+  args::Parser parser("tool", "設定ファイルの値を引数で上書きする");
+  parser.root().value("retry_limit", 'r', "再試行回数の上限（設定値を上書き）");
+
+  args::Result result = parser.parse(argc, argv);
+  if (!result.ok()) {
+    std::cerr << result.error() << "\n";
+    return 2;
+  }
+  if (result.helpRequested()) {
+    std::cout << result.helpText();
+    return 0;
+  }
+
+  ConfigManager conf;
+  ConfData data = conf.get(); // コピー（get() は const ConfData& を返す）
+  if (result.has("retry_limit") &&
+      !result.getInt("retry_limit", data.retry_limit)) {
+    std::string raw;
+    result.getString("retry_limit", raw);
+    result.failInvalidValue("retry_limit", raw);
+    std::cerr << result.error() << "\n"; // errorName(result.errorKind()) は invalid_value
+    return 2;
+  }
+  std::cout << "retry_limit=" << data.retry_limit << "\n";
+  return 0;
+}
+```
+
 ## 仕様
 
 ### 解析の流れ
 
-1. サブコマンドが1つ以上登録されていれば、先頭トークンで振り分ける。
-   - 先頭が `--help` / `-h` → 全体の使い方（サブコマンド一覧）
+1. 走査を始める前に、`--` より前のトークンに `--help` / `-h` があるかを調べる。
+   あれば、他のエラー（未定義オプション、値なし、必須なしなど）より優先して help を返す。
+   - サブコマンドあり: 先頭トークンが登録済みサブコマンドなら、そのサブコマンドの使い方
+     （`command()` はその名前。例: `run --bogus --help` → run の使い方）。
+     先頭が `--help` / `-h` や `-` 始まり、未登録の名前（例: `stop --help`）なら全体の使い方
+     （`command()` は空）。
+   - サブコマンドなし: `root()` の使い方（`command()` は空）。
+   - `--` より後の `--help` / `-h` は位置引数。
+2. サブコマンドが1つ以上登録されていれば、先頭トークンで振り分ける。
    - トークンなし、または先頭が `-` で始まる → `missing_command`
    - 登録されていない名前 → `unknown_command`
-2. サブコマンドがなければ、`root()` の定義で全トークンを解析する。
-3. 既定値を入れてから、オプションを左から順に読む。同じオプションの再指定は後勝ち。
-4. 最初のエラーで解析を止める（`Result` は最初のエラーだけを持つ）。
-5. 最後まで読めたら必須チェックを行う（定義順で最初の欠落を報告）。
+3. サブコマンドがなければ、`root()` の定義で全トークンを解析する。
+4. 既定値を入れてから、オプションを左から順に読む。同じオプションを2回指定したら後勝ち
+   （例: `--count 2 --count 3` は `3`）。
+5. 最初のエラーで解析を止める（`Result` は最初のエラーだけを持つ）。
+6. 最後まで読めたら必須チェックを行う（定義順で最初の欠落を報告）。
 
 ### オプションの書式
 
-| 書式                             | 扱い                                                                          |
-| -------------------------------- | ----------------------------------------------------------------------------- |
-| `--name value`                   | 値付きオプション                                                              |
-| `--name=value`                   | 値付きオプション（値に `=` や `-` 始まりを含めてよい。`--name=` は空文字）    |
-| `-n value`                       | 短い名前の値付きオプション                                                    |
-| `--flag` / `-f`                  | フラグ。値は `"true"` として保持                                              |
-| `--flag=値`                      | `unexpected_value`                                                            |
-| `--help` / `-h`                  | 使い方を生成して返す（`--` より前のどこにあってもよい。必須チェックより優先） |
-| `--`                             | 以降はすべて位置引数（`-` 始まりも含む）                                      |
-| `-` 単独、`-` で始まらない語     | 位置引数                                                                      |
-| `-abc`（まとめ書き）、`-n=value` | 非対応。`unknown_option`                                                      |
+| 書式                             | 扱い                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `--name value`                   | 値付きオプション                                                                     |
+| `--name=value`                   | 値付きオプション（値に `=` や `-` 始まりを含めてよい。`--name=` は `missing_value`） |
+| `-n value`                       | 短い名前の値付きオプション                                                           |
+| `--flag` / `-f`                  | フラグ。値は `"true"` として保持                                                     |
+| `--flag=値`                      | `unexpected_value`                                                                   |
+| `--help` / `-h`                  | 使い方を生成して返す（`--` より前のどこにあってもよい。他のエラーより優先）          |
+| `--`                             | 以降はすべて位置引数（`-` 始まりも含む）                                             |
+| `-` 単独、`-` で始まらない語     | 位置引数                                                                             |
+| `-abc`（まとめ書き）、`-n=value` | 非対応。`unknown_option`                                                             |
 
-- 値付きオプションの値は次のトークン。次がない場合、または次が `-` で始まる
+- 値付きオプションの値は次のトークン。次がない場合、次が空文字の場合、または次が `-` で始まる
   2文字以上のトークン（`-5` や `-.5` のように2文字目が数字か `.` のものを除く）
   の場合は `missing_value`。`-` 始まりの文字列を値にしたいときは `--name=value` を使う。
-- `-5` のような負数を位置引数にしたいときは `--` の後に置く（前に置くと短いオプション扱い）。
+  `--help` / `-h` は値として受け付けない（help として扱う）。
+- 空の値は、値付きオプションすべてで `missing_value`（`--name=` と `--name ""` の両方）。
+- オプションの値としての `-5` は受け付ける（例: `--count -2`）。位置引数の `-5` は短い
+  オプション扱いで `unknown_option` になる。負数を位置引数にしたいときは `--` の後に置く。
 
 ### 型変換規則（取得時）
 
@@ -173,20 +228,35 @@ const args::Result r = parser.parse(argc, argv);   // 例: tool -o out.txt a.txt
 | `getDouble` | `strtod` で末尾まで変換でき、有限値              | `1.2.3`、`inf`、`nan`、空文字、先頭空白、範囲外 |
 | `getBool`   | `true` `1` `yes` `on` / `false` `0` `no` `off`   | `TRUE`、`2`                                     |
 
-変換失敗はライブラリ側でエラーにしない。呼び出し側が `invalid_value` として扱う
-（ドライバは `--count` / `--ratio` の変換失敗を `error=invalid_value` で返す）。
+`getBool` は大文字小文字を区別する（`TRUE`、`Yes` は失敗）。
+
+変換失敗は解析時にはエラーにしない。取得関数が false を返したら、呼び出し側が
+`Result::failInvalidValue(long, raw)` で記録する。`errorKind()` が `InvalidValue`、
+`error()` が `オプションの値を変換できません: --<long>=<raw>` になる。既にエラーが
+あれば上書きしない（最初の1件を保持する）。ドライバは `--count` / `--ratio` /
+`--dry-run` の変換失敗をこの関数で記録し、`error=invalid_value` で返す。
+
+```cpp
+args::Result r = parser.parse(argc, argv); // failInvalidValue を呼ぶので const にしない
+int count = 0;
+if (!r.getInt("count", count)) {
+  std::string raw;
+  r.getString("count", raw);
+  r.failInvalidValue("count", raw);
+}
+```
 
 ### エラー種別
 
-| `ErrorKind`       | `errorName()`      | 発生条件                       |
-| ----------------- | ------------------ | ------------------------------ |
-| `UnknownOption`   | `unknown_option`   | 未定義のオプション、まとめ書き |
-| `MissingValue`    | `missing_value`    | 値付きオプションの値がない     |
-| `UnexpectedValue` | `unexpected_value` | フラグに `=値` を付けた        |
-| `MissingRequired` | `missing_required` | 必須オプションがない           |
-| `InvalidValue`    | `invalid_value`    | 型変換失敗（呼び出し側が使う） |
-| `UnknownCommand`  | `unknown_command`  | 未知のサブコマンド             |
-| `MissingCommand`  | `missing_command`  | サブコマンドがない             |
+| `ErrorKind`       | `errorName()`      | 発生条件                                |
+| ----------------- | ------------------ | --------------------------------------- |
+| `UnknownOption`   | `unknown_option`   | 未定義のオプション、まとめ書き          |
+| `MissingValue`    | `missing_value`    | 値付きオプションの値がない              |
+| `UnexpectedValue` | `unexpected_value` | フラグに `=値` を付けた                 |
+| `MissingRequired` | `missing_required` | 必須オプションがない                    |
+| `InvalidValue`    | `invalid_value`    | 型変換失敗（`failInvalidValue` で記録） |
+| `UnknownCommand`  | `unknown_command`  | 未知のサブコマンド                      |
+| `MissingCommand`  | `missing_command`  | サブコマンドがない                      |
 
 ### help の形式
 
@@ -199,6 +269,7 @@ libArgs のデモ兼テストドライバ
 サブコマンド:
   run   ジョブを実行する
   list  ジョブ一覧を表示する
+  conf  設定値（bool）を表示する
 
 各サブコマンドの詳細: libArgsSample <サブコマンド> --help
 ```
@@ -222,15 +293,16 @@ libArgs のデモ兼テストドライバ
 
 ## ドライバ（main.cpp）の出力
 
-| 行         | 内容                                                                         |
-| ---------- | ---------------------------------------------------------------------------- |
-| `IN_ARGS=` | 受け取った引数を空白で連結                                                   |
-| `MSG=`     | エラーメッセージ（エラー時のみ）                                             |
-| `RET=`     | `NML` / `ERR`                                                                |
-| `VALUE=`   | run: `cmd=run id=<ID> count=<N> ratio=<R or -> verbose=<0/1> pos=<a,b or ->` |
-|            | list: `cmd=list all=<0/1> pos=<a,b or ->`                                    |
-|            | help: `help=<run / list / global>`（使い方本文は `RET=` の前に出す）         |
-|            | エラー: `error=<errorName()>`                                                |
+| 行         | 内容                                                                           |
+| ---------- | ------------------------------------------------------------------------------ |
+| `IN_ARGS=` | 受け取った引数を空白で連結                                                     |
+| `MSG=`     | エラーメッセージ（エラー時のみ）                                               |
+| `RET=`     | `NML` / `ERR`                                                                  |
+| `VALUE=`   | run: `cmd=run id=<ID> count=<N> ratio=<R or -> verbose=<0/1> pos=<a,b or ->`   |
+|            | list: `cmd=list all=<0/1> pos=<a,b or ->`                                      |
+|            | conf: `cmd=conf dry_run=<0/1>`（`--dry-run` は既定 `false`、`getBool` で取得） |
+|            | help: `help=<run / list / conf / global>`（使い方本文は `RET=` の前に出す）    |
+|            | エラー: `error=<errorName()>`                                                  |
 
 終了コード: 0=成功（`--help` を含む）、2=引数エラー。
 
@@ -248,6 +320,46 @@ libArgs のデモ兼テストドライバ
 
 ケースを追加したら、期待値は `main.cpp` の出力形式（上表）から導く。`ratio` は
 `std::ostream` の既定書式（例: `0.25`、`1.5`）で出る。
+
+ケース表で書けないもの:
+
+- 引数なしのケース（`args` 列を空にできないため。`-` も照合しない印ではなく引数 `-` として渡る）。
+- 空文字のトークン（`--id ""`）。`args` は `read -r -a` で空白分割し、クォートを
+  解釈しないため、空トークンを渡せない。`--id ""` が `missing_value` になることは
+  実装（空文字を値とみなさない）で担保し、ケース表では `--id=`（E13）で代替する。
+
+### ケース一覧
+
+| id  | args                                  | 期待 RET | 期待 VALUE                                                  |
+| --- | ------------------------------------- | -------- | ----------------------------------------------------------- |
+| A01 | `run --id C01 --count 3 -v`           | NML      | `cmd=run id=C01 count=3 ratio=- verbose=1 pos=-`            |
+| A02 | `run --id=C02 --count=5 --ratio=0.25` | NML      | `cmd=run id=C02 count=5 ratio=0.25 verbose=0 pos=-`         |
+| A03 | `run -i C03 -c 2 -r 1.5 --verbose`    | NML      | `cmd=run id=C03 count=2 ratio=1.5 verbose=1 pos=-`          |
+| A04 | `run --id C04`                        | NML      | `cmd=run id=C04 count=1 ratio=- verbose=0 pos=-`            |
+| A05 | `run --id C05 --count -2`             | NML      | `cmd=run id=C05 count=-2 ratio=- verbose=0 pos=-`           |
+| A06 | `list --all`                          | NML      | `cmd=list all=1 pos=-`                                      |
+| A07 | `list`                                | NML      | `cmd=list all=0 pos=-`                                      |
+| A08 | `run --id C08 -- --count x -v`        | NML      | `cmd=run id=C08 count=1 ratio=- verbose=0 pos=--count,x,-v` |
+| A09 | `run --help`                          | NML      | `help=run`                                                  |
+| A10 | `--help`                              | NML      | `help=global`                                               |
+| A11 | `run --id --help`                     | NML      | `help=run`（`--help` は値にならず help が優先）             |
+| A12 | `run --bogus --help`                  | NML      | `help=run`（未定義オプションより help が優先）              |
+| A13 | `conf --dry-run yes`                  | NML      | `cmd=conf dry_run=1`                                        |
+| A14 | `conf --dry-run off`                  | NML      | `cmd=conf dry_run=0`                                        |
+| E01 | `run --count 3`                       | ERR      | `error=missing_required`                                    |
+| E02 | `run --id C01 --count abc`            | ERR      | `error=invalid_value`                                       |
+| E03 | `run --id C01 --count 3x`             | ERR      | `error=invalid_value`                                       |
+| E04 | `run --id C01 --unknown`              | ERR      | `error=unknown_option`                                      |
+| E05 | `run --id`                            | ERR      | `error=missing_value`                                       |
+| E06 | `stop --id C01`                       | ERR      | `error=unknown_command`                                     |
+| E07 | `list --all=1`                        | ERR      | `error=unexpected_value`                                    |
+| E08 | `-v`                                  | ERR      | `error=missing_command`                                     |
+| E09 | `conf --dry-run TRUE`                 | ERR      | `error=invalid_value`（`toBool` は大文字小文字を区別する）  |
+| E10 | `conf --dry-run maybe`                | ERR      | `error=invalid_value`                                       |
+| E11 | `run --id C01 --ratio abc`            | ERR      | `error=invalid_value`                                       |
+| E12 | `run --id C01 --count 99999999999`    | ERR      | `error=invalid_value`（`int` 範囲外）                       |
+| E13 | `run --id=`                           | ERR      | `error=missing_value`（空の値）                             |
+| E14 | `run -i`                              | ERR      | `error=missing_value`                                       |
 
 ## 制約
 

@@ -1,11 +1,12 @@
 /*
  * libArgs sample ドライバ（デモ兼テストドライバ）
  * 受け取った引数を libArgs で解析し、結果を標準出力へ出す。
- * run_tests.sh がケース表（cases/*.tsv）から1ケースずつ別プロセスで起動する。
+ * run_tests.sh がケース表（cases/ 配下の
+ * .tsv）から1ケースずつ別プロセスで起動する。
  *
- *   libArgsSample run --id <ID> [--count <N>] [--ratio <R>] [-v] [--] [位置引数...]
- *   libArgsSample list [--all] [位置引数...]
- *   libArgsSample --help | <サブコマンド> --help
+ *   libArgsSample run --id <ID> [--count <N>] [--ratio <R>] [-v] [--]
+ * [位置引数...] libArgsSample list [--all] [位置引数...] libArgsSample conf
+ * [--dry-run <BOOL>] libArgsSample --help | <サブコマンド> --help
  *
  * 標準出力（run_tests.sh が合否判定と証跡に使う）:
  *   IN_ARGS=<受け取った引数を空白で連結>
@@ -14,6 +15,7 @@
  *   VALUE=<結果>
  *     run  : cmd=run id=<ID> count=<N> ratio=<R|-> verbose=<0|1> pos=<a,b|->
  *     list : cmd=list all=<0|1> pos=<a,b|->
+ *     conf : cmd=conf dry_run=<0|1>
  *     help : help=<サブコマンド名|global>（使い方本文は RET= の前に出す）
  *     エラー: error=<種別>（args::errorName() の名前）
  *
@@ -53,22 +55,28 @@ int reportError(args::ErrorKind kind, const std::string &message) {
   return EXIT_ARG_ERROR;
 }
 
-int handleRun(const args::Result &result) {
+// 型変換に失敗した値を Result に invalid_value として記録し、エラーを出力する
+int reportInvalidValue(args::Result &result, const std::string &longName) {
+  std::string raw;
+  result.getString(longName, raw);
+  result.failInvalidValue(longName, raw);
+  return reportError(result.errorKind(), result.error());
+}
+
+int handleRun(args::Result &result) {
   std::string id;
   result.getString("id", id); // 必須なので解析成功時は必ずある
 
   int count = 0;
   if (!result.getInt("count", count)) {
-    return reportError(args::ErrorKind::InvalidValue,
-                       "--count は整数で指定してください");
+    return reportInvalidValue(result, "count");
   }
 
   std::string ratioText = "-";
   if (result.has("ratio")) {
     double ratio = 0.0;
     if (!result.getDouble("ratio", ratio)) {
-      return reportError(args::ErrorKind::InvalidValue,
-                         "--ratio は数値で指定してください");
+      return reportInvalidValue(result, "ratio");
     }
     std::ostringstream os;
     os << ratio;
@@ -91,6 +99,17 @@ int handleList(const args::Result &result) {
   return EXIT_OK;
 }
 
+// bool 取得の確認用。--dry-run は値付きオプションで、getBool で取得する
+int handleConf(args::Result &result) {
+  bool dryRun = false;
+  if (!result.getBool("dry-run", dryRun)) {
+    return reportInvalidValue(result, "dry-run");
+  }
+  std::cout << "RET=NML\n";
+  std::cout << "VALUE=cmd=conf dry_run=" << (dryRun ? 1 : 0) << "\n";
+  return EXIT_OK;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -105,6 +124,9 @@ int main(int argc, char **argv) {
   args::Command &list = parser.addCommand("list", "ジョブ一覧を表示する");
   list.flag("all", 'a', "すべて表示する");
 
+  args::Command &conf = parser.addCommand("conf", "設定値（bool）を表示する");
+  conf.withDefault("dry-run", 'n', "false", "書き込まない（true/false 等）");
+
   /* 入力の証跡 */
   std::cout << "IN_ARGS=";
   for (int i = 1; i < argc; ++i) {
@@ -112,7 +134,7 @@ int main(int argc, char **argv) {
   }
   std::cout << "\n";
 
-  const args::Result result = parser.parse(argc, argv);
+  args::Result result = parser.parse(argc, argv);
   if (!result.ok()) {
     return reportError(result.errorKind(), result.error());
   }
@@ -130,6 +152,9 @@ int main(int argc, char **argv) {
   }
   if ("list" == result.command()) {
     return handleList(result);
+  }
+  if ("conf" == result.command()) {
+    return handleConf(result);
   }
   // 登録済みサブコマンドはすべて上で処理するため、ここには来ない
   return reportError(args::ErrorKind::UnknownCommand,

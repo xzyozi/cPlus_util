@@ -3,13 +3,15 @@
  *
  * 機能:
  *   - サブコマンドの振り分け（prog run --id C01 / prog list）
- *     サブコマンドを1つも登録しなければ、root() の定義で単一コマンドとして解析する
+ *     サブコマンドを1つも登録しなければ、root()
+ * の定義で単一コマンドとして解析する
  *   - 長いオプション --name value / --name=value、短いオプション -n value
  *   - フラグ（値なし。-v / --verbose）
  *   - -- 以降は位置引数。オプションでない単独トークンも位置引数
  *   - 必須・任意・既定値
- *   - 取得時の型変換 int / double / string / bool（末尾まで変換できた場合のみ成功）
- *   - --help / -h で使い方を自動生成
+ *   - 取得時の型変換 int / double / string /
+ * bool（末尾まで変換できた場合のみ成功）
+ *   - --help / -h で使い方を自動生成（-- より前のどこにあってもよい）
  *
  * 例外は投げない。解析結果（Result）にエラー種別とメッセージを持たせ、
  * 終了コードは呼び出し側が決める。
@@ -32,7 +34,8 @@ enum class ErrorKind {
   MissingValue,    // 値付きオプションの値がない
   UnexpectedValue, // フラグに --flag=値 で値を指定した
   MissingRequired, // 必須オプションがない
-  InvalidValue,    // 型変換失敗（Result の取得関数の失敗を呼び出し側が報告する）
+  InvalidValue,    // 型変換失敗（呼び出し側が Result::failInvalidValue
+                   // で記録する）
   UnknownCommand,  // 未知のサブコマンド
   MissingCommand,  // サブコマンドが指定されていない
 };
@@ -85,6 +88,8 @@ public:
   const OptionDef *findShort(char shortName) const;
 
 private:
+  // 定義を追加する。long 名 help・short 名 'h'（予約名）と、同一コマンド内の
+  // long 名・short 名の重複は assert で停止する（NDEBUG 時は検出しない）
   Command &add(const OptionDef &def);
 
   std::string name_;
@@ -115,6 +120,10 @@ public:
   bool getDouble(const std::string &longName, double &out) const;
   bool getBool(const std::string &longName, bool &out) const;
 
+  // 取得関数の型変換失敗を InvalidValue として記録する。
+  // raw は変換できなかった値。既にエラーがあれば上書きしない（最初の1件を保持）
+  void failInvalidValue(const std::string &longName, const std::string &raw);
+
 private:
   friend class Parser;
   // 最初のエラーだけを保持する
@@ -125,7 +134,8 @@ private:
   std::string error_;
   std::string command_;
   std::string helpText_;
-  std::map<std::string, std::string> values_; // longName → 値（フラグは "true"）
+  std::map<std::string, std::string>
+      values_; // longName → 値（フラグは "true"）
   std::vector<std::string> positionals_;
 };
 

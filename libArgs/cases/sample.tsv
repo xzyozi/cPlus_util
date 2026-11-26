@@ -13,6 +13,10 @@ A07	list	NML	cmd=list all=0 pos=-
 A08	run --id C08 -- --count x -v	NML	cmd=run id=C08 count=1 ratio=- verbose=0 pos=--count,x,-v
 A09	run --help	NML	help=run
 A10	--help	NML	help=global
+A11	run --id --help	NML	help=run
+A12	run --bogus --help	NML	help=run
+A13	conf --dry-run yes	NML	cmd=conf dry_run=1
+A14	conf --dry-run off	NML	cmd=conf dry_run=0
 E01	run --count 3	ERR	error=missing_required
 E02	run --id C01 --count abc	ERR	error=invalid_value
 E03	run --id C01 --count 3x	ERR	error=invalid_value
@@ -21,3 +25,9 @@ E05	run --id	ERR	error=missing_value
 E06	stop --id C01	ERR	error=unknown_command
 E07	list --all=1	ERR	error=unexpected_value
 E08	-v	ERR	error=missing_command
+E09	conf --dry-run TRUE	ERR	error=invalid_value
+E10	conf --dry-run maybe	ERR	error=invalid_value
+E11	run --id C01 --ratio abc	ERR	error=invalid_value
+E12	run --id C01 --count 99999999999	ERR	error=invalid_value
+E13	run --id=	ERR	error=missing_value
+E14	run -i	ERR	error=missing_value

@@ -4,6 +4,7 @@
  */
 #include "args.hpp"
 
+#include <cassert>
 #include <cctype>
 #include <cerrno>
 #include <climits>
@@ -25,13 +26,30 @@ bool startsWithSpace(const std::string &text) {
 }
 
 // 値付きオプションの次トークンを値として使えるか。
-// "-" で始まる2文字以上のトークンは、負の数（-5, -.5）だけを値とみなす。
+// 空文字は値とみなさない。"-" で始まる2文字以上のトークンは、
+// 負の数（-5, -.5）だけを値とみなす（-h / --help は値にならない）。
 bool looksLikeValue(const std::string &token) {
+  if (token.empty()) {
+    return false;
+  }
   if (2 > token.size() || '-' != token[0]) {
     return true;
   }
   const unsigned char second = static_cast<unsigned char>(token[1]);
   return 0 != std::isdigit(second) || '.' == token[1];
+}
+
+// -- より前に --help / -h があるか
+bool hasHelpBeforeSeparator(const std::vector<std::string> &tokens) {
+  for (const std::string &token : tokens) {
+    if (SEPARATOR == token) {
+      return false;
+    }
+    if (HELP_LONG == token || HELP_SHORT == token) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::string padRight(const std::string &text, std::size_t width) {
@@ -126,6 +144,11 @@ Command::Command(const std::string &name, const std::string &description)
     : name_(name), description_(description) {}
 
 Command &Command::add(const OptionDef &def) {
+  // 定義の誤りはプログラムの誤りなので assert で止める（NDEBUG 時は検出しない）
+  assert("help" != def.longName && "--help は予約名です");
+  assert('h' != def.shortName && "-h は予約名です");
+  assert(nullptr == findLong(def.longName) && "long 名が重複しています");
+  assert(nullptr == findShort(def.shortName) && "short 名が重複しています");
   options_.push_back(def);
   return *this;
 }
@@ -202,6 +225,12 @@ void Result::fail(ErrorKind kind, const std::string &message) {
   error_ = message;
 }
 
+void Result::failInvalidValue(const std::string &longName,
+                              const std::string &raw) {
+  fail(ErrorKind::InvalidValue,
+       "オプションの値を変換できません: --" + longName + "=" + raw);
+}
+
 bool Result::has(const std::string &longName) const {
   return values_.end() != values_.find(longName);
 }
@@ -267,23 +296,37 @@ Result Parser::parse(int argc, const char *const *argv) const {
 
 Result Parser::parse(const std::vector<std::string> &tokens) const {
   Result result;
+  // --help / -h は -- より前のどこにあってもよく、解析エラーより優先する
+  const bool helpWanted = hasHelpBeforeSeparator(tokens);
   if (commands_.empty()) {
+    if (helpWanted) {
+      result.helpRequested_ = true;
+      result.helpText_ = help(root_);
+      return result;
+    }
     parseOptions(root_, tokens, 0, result);
     return result;
   }
 
+  if (helpWanted) {
+    // 先頭が登録済みサブコマンドならその使い方、それ以外は全体の使い方
+    const Command *helpCmd = findCommand(tokens[0]);
+    result.helpRequested_ = true;
+    if (nullptr == helpCmd) {
+      result.helpText_ = help();
+    } else {
+      result.command_ = helpCmd->name();
+      result.helpText_ = help(*helpCmd);
+    }
+    return result;
+  }
   if (tokens.empty()) {
-    result.fail(ErrorKind::MissingCommand,
-                "サブコマンドを指定してください（" + program_ +
-                    " --help で一覧を表示）");
+    result.fail(ErrorKind::MissingCommand, "サブコマンドを指定してください（" +
+                                               program_ +
+                                               " --help で一覧を表示）");
     return result;
   }
   const std::string &first = tokens[0];
-  if (HELP_LONG == first || HELP_SHORT == first) {
-    result.helpRequested_ = true;
-    result.helpText_ = help();
-    return result;
-  }
   if (!first.empty() && '-' == first[0]) {
     result.fail(ErrorKind::MissingCommand,
                 "オプションの前にサブコマンドを指定してください: " + first);
@@ -308,7 +351,8 @@ bool Parser::consumeValue(const OptionDef &def, const std::string &label,
   }
   const std::size_t next = index + 1;
   if (tokens.size() <= next || !looksLikeValue(tokens[next])) {
-    result.fail(ErrorKind::MissingValue, "オプションの値がありません: " + label);
+    result.fail(ErrorKind::MissingValue,
+                "オプションの値がありません: " + label);
     return false;
   }
   result.values_[def.longName] = tokens[next];
@@ -337,11 +381,7 @@ void Parser::parseOptions(const Command &cmd,
       afterSeparator = true;
       continue;
     }
-    if (HELP_LONG == token || HELP_SHORT == token) {
-      result.helpRequested_ = true;
-      result.helpText_ = help(cmd);
-      return;
-    }
+    // --help / -h は parse() で先に処理済みのため、ここには来ない
 
     // 長いオプション（--name / --name=value）
     if (2 < token.size() && 0 == token.compare(0, 2, SEPARATOR)) {
@@ -350,7 +390,8 @@ void Parser::parseOptions(const Command &cmd,
           (std::string::npos == eq) ? token.substr(2) : token.substr(2, eq - 2);
       const OptionDef *def = cmd.findLong(name);
       if (nullptr == def) {
-        result.fail(ErrorKind::UnknownOption, "未定義のオプションです: --" + name);
+        result.fail(ErrorKind::UnknownOption,
+                    "未定義のオプションです: --" + name);
         return;
       }
       if (std::string::npos != eq) {
@@ -359,7 +400,13 @@ void Parser::parseOptions(const Command &cmd,
                       "フラグに値は指定できません: --" + name);
           return;
         }
-        result.values_[def->longName] = token.substr(eq + 1);
+        const std::string text = token.substr(eq + 1);
+        if (text.empty()) {
+          result.fail(ErrorKind::MissingValue,
+                      "オプションの値がありません: --" + name);
+          return;
+        }
+        result.values_[def->longName] = text;
         continue;
       }
       if (!consumeValue(*def, "--" + name, tokens, i, result)) {
@@ -372,7 +419,8 @@ void Parser::parseOptions(const Command &cmd,
     if (2 == token.size() && '-' == token[0]) {
       const OptionDef *def = cmd.findShort(token[1]);
       if (nullptr == def) {
-        result.fail(ErrorKind::UnknownOption, "未定義のオプションです: " + token);
+        result.fail(ErrorKind::UnknownOption,
+                    "未定義のオプションです: " + token);
         return;
       }
       if (!consumeValue(*def, token, tokens, i, result)) {
