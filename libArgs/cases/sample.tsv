@@ -1,0 +1,23 @@
+# libArgs sample のケース表（タブ区切り・UTF-8・LF。# で始まる行はコメント）
+# 列: id	args	exp_ret	exp_value
+#   args      : ドライバへ渡す引数（空白区切り。クォートは使わない）
+#   exp_ret   : NML / ERR（終了コードは NML=0、ERR=2 を併せて照合する）
+#   exp_value : ドライバが出力する VALUE= の値。- = 照合しない
+A01	run --id C01 --count 3 -v	NML	cmd=run id=C01 count=3 ratio=- verbose=1 pos=-
+A02	run --id=C02 --count=5 --ratio=0.25	NML	cmd=run id=C02 count=5 ratio=0.25 verbose=0 pos=-
+A03	run -i C03 -c 2 -r 1.5 --verbose	NML	cmd=run id=C03 count=2 ratio=1.5 verbose=1 pos=-
+A04	run --id C04	NML	cmd=run id=C04 count=1 ratio=- verbose=0 pos=-
+A05	run --id C05 --count -2	NML	cmd=run id=C05 count=-2 ratio=- verbose=0 pos=-
+A06	list --all	NML	cmd=list all=1 pos=-
+A07	list	NML	cmd=list all=0 pos=-
+A08	run --id C08 -- --count x -v	NML	cmd=run id=C08 count=1 ratio=- verbose=0 pos=--count,x,-v
+A09	run --help	NML	help=run
+A10	--help	NML	help=global
+E01	run --count 3	ERR	error=missing_required
+E02	run --id C01 --count abc	ERR	error=invalid_value
+E03	run --id C01 --count 3x	ERR	error=invalid_value
+E04	run --id C01 --unknown	ERR	error=unknown_option
+E05	run --id	ERR	error=missing_value
+E06	stop --id C01	ERR	error=unknown_command
+E07	list --all=1	ERR	error=unexpected_value
+E08	-v	ERR	error=missing_command
